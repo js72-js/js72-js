@@ -459,4 +459,4 @@ class OfflineStorageService {
   }
 }
 
-export default OfflineStorageService.getInstance();
+export default OfflineStorageService;
