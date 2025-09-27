@@ -1185,17 +1185,8 @@ async def create_sales_summary(sale_id: str, seller_name: str):
         print(f"Error creating sales summary: {e}")
 
 # ================================
-# Sales History and Reports
+# Debt Management Routes
 # ================================
-
-@api_router.get("/sales/history")
-async def get_sales_history(
-    current_user: UserResponse = Depends(get_current_user),
-    limit: int = 50,
-    offset: int = 0
-):
-    """Get sales history with pagination"""
-    return []
 
 @api_router.get("/debts")
 async def get_debts(
