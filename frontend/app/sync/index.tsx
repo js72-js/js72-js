@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import OfflineStorageService from '../../services/OfflineStorage';
+import OfflineStorageClass from '../../services/OfflineStorage';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
