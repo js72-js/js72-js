@@ -292,6 +292,251 @@ async def create_category(category_data: CategoryCreate, current_user: UserRespo
     return Category(**category_dict)
 
 # ================================
+# Products Routes
+# ================================
+
+@api_router.get("/products", response_model=List[Product])
+async def get_products(
+    category_id: Optional[str] = None,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    query = {}
+    if category_id:
+        query["category_id"] = category_id
+    
+    products = await db.products.find(query).to_list(1000)
+    for product in products:
+        product["id"] = str(product["_id"])
+        del product["_id"]
+    return [Product(**product) for product in products]
+
+@api_router.get("/products/{product_id}", response_model=Product)
+async def get_product(product_id: str, current_user: UserResponse = Depends(get_current_user)):
+    try:
+        product = await db.products.find_one({"_id": ObjectId(product_id)})
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        product["id"] = str(product["_id"])
+        del product["_id"]
+        return Product(**product)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+
+@api_router.post("/products", response_model=Product)
+async def create_product(
+    product_data: ProductCreate, 
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    # Check if category exists
+    category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
+    if not category:
+        raise HTTPException(status_code=400, detail="Category not found")
+    
+    # Check if product code already exists
+    existing_product = await db.products.find_one({"code": product_data.code})
+    if existing_product:
+        raise HTTPException(status_code=400, detail="Product code already exists")
+    
+    product = Product(**product_data.dict())
+    product_dict = product.dict()
+    product_dict["_id"] = ObjectId(product_dict["id"])
+    del product_dict["id"]
+    
+    result = await db.products.insert_one(product_dict)
+    product_dict["id"] = str(result.inserted_id)
+    del product_dict["_id"]
+    
+    return Product(**product_dict)
+
+@api_router.put("/products/{product_id}", response_model=Product)
+async def update_product(
+    product_id: str,
+    product_data: ProductCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Check if product exists
+        existing_product = await db.products.find_one({"_id": ObjectId(product_id)})
+        if not existing_product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Check if category exists
+        category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
+        if not category:
+            raise HTTPException(status_code=400, detail="Category not found")
+        
+        # Check if new code conflicts with another product
+        code_conflict = await db.products.find_one({
+            "code": product_data.code, 
+            "_id": {"$ne": ObjectId(product_id)}
+        })
+        if code_conflict:
+            raise HTTPException(status_code=400, detail="Product code already exists")
+        
+        # Update product
+        update_data = product_data.dict()
+        update_data["updated_at"] = datetime.utcnow()
+        
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)}, 
+            {"$set": update_data}
+        )
+        
+        # Return updated product
+        updated_product = await db.products.find_one({"_id": ObjectId(product_id)})
+        updated_product["id"] = str(updated_product["_id"])
+        del updated_product["_id"]
+        
+        return Product(**updated_product)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+
+@api_router.delete("/products/{product_id}")
+async def delete_product(
+    product_id: str, 
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        result = await db.products.delete_one({"_id": ObjectId(product_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        return {"message": "Product deleted successfully"}
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+
+@api_router.patch("/products/{product_id}/stock")
+async def update_product_stock(
+    product_id: str,
+    stock_data: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        new_stock = stock_data.get("stock")
+        if new_stock is None or new_stock < 0:
+            raise HTTPException(status_code=400, detail="Invalid stock value")
+        
+        result = await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": {"stock": new_stock, "updated_at": datetime.utcnow()}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Return updated product
+        updated_product = await db.products.find_one({"_id": ObjectId(product_id)})
+        updated_product["id"] = str(updated_product["_id"])
+        del updated_product["_id"]
+        
+        return Product(**updated_product)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+
+# ================================
+# Categories Routes (Complete CRUD)
+# ================================
+
+@api_router.put("/categories/{category_id}", response_model=Category)
+async def update_category(
+    category_id: str,
+    category_data: CategoryCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        result = await db.categories.update_one(
+            {"_id": ObjectId(category_id)},
+            {"$set": category_data.dict()}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        # Return updated category
+        updated_category = await db.categories.find_one({"_id": ObjectId(category_id)})
+        updated_category["id"] = str(updated_category["_id"])
+        del updated_category["_id"]
+        
+        return Category(**updated_category)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Invalid category ID")
+
+@api_router.delete("/categories/{category_id}")
+async def delete_category(
+    category_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Check if category has products
+        products_count = await db.products.count_documents({"category_id": category_id})
+        if products_count > 0:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot delete category. It has {products_count} products."
+            )
+        
+        result = await db.categories.delete_one({"_id": ObjectId(category_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Category not found")
+        
+        return {"message": "Category deleted successfully"}
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Invalid category ID")
+
+# ================================
 # Initial Setup Routes
 # ================================
 
