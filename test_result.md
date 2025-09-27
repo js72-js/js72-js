@@ -149,3 +149,5 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Phase 1 implémentée: Infrastructure backend avec JWT auth, modèles de données, splash screen, login et dashboard. Prêt pour test de l'authentification complète avec compte admin par défaut."
+  - agent: "testing"
+    message: "PHASE 1 BACKEND TESTS COMPLETS - TOUS RÉUSSIS ✅ Infrastructure et Authentification 100% fonctionnelle. Problème bcrypt résolu (downgrade v5.0.0 → v4.1.3). Tous les endpoints testés: /api/setup/init, /api/auth/login, /api/auth/me, /api/auth/register, /api/categories. Admin par défaut créé (admin@salesmanager.com/admin123), catégories par défaut créées, JWT auth fonctionnel, gestion d'erreurs correcte. Backend prêt pour Phase 2."
