@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
 # Configuration
-BASE_URL = "https://sales-manager-25.preview.emergentagent.com/api"
+BASE_URL = "https://salesync-1.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@salesmanager.com"
 ADMIN_PASSWORD = "admin123"
 

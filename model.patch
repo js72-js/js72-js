@@ -30,7 +30,7 @@ index 1ffe1ce..e69de29 100644
 -+import sys
 -+
 -+# Configuration
--+BASE_URL = "https://sales-manager-25.preview.emergentagent.com/api"
+-+BASE_URL = "https://salesync-1.preview.emergentagent.com/api"
 -+ADMIN_EMAIL = "admin@salesmanager.com"
 -+ADMIN_PASSWORD = "admin123"
 -+
@@ -1204,7 +1204,7 @@ index 1ffe1ce..e69de29 100644
 ----+from datetime import datetime
 ----+
 ----+# Configuration
-----+BASE_URL = "https://sales-manager-25.preview.emergentagent.com/api"
+----+BASE_URL = "https://salesync-1.preview.emergentagent.com/api"
 ----+ADMIN_EMAIL = "admin@salesmanager.com"
 ----+ADMIN_PASSWORD = "admin123"
 ----+
