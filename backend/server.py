@@ -1718,6 +1718,421 @@ async def update_purchase_total(purchase_id: str):
         return 0.0
 
 # ================================
+# Reports and Analytics Routes
+# ================================
+
+@api_router.get("/reports/sales-summary")
+async def get_sales_summary(
+    current_user: UserResponse = Depends(get_current_user),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    seller_name: Optional[str] = None,
+    payment_method: Optional[str] = None
+):
+    """Get sales summary with filters"""
+    try:
+        # Build query filter
+        query = {"status": "completed"}
+        
+        # Date range filter
+        if start_date or end_date:
+            date_filter = {}
+            if start_date:
+                try:
+                    date_filter["$gte"] = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                except:
+                    date_filter["$gte"] = datetime.fromisoformat(start_date)
+            if end_date:
+                try:
+                    date_filter["$lte"] = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                except:
+                    date_filter["$lte"] = datetime.fromisostring(end_date)
+            query["completed_at"] = date_filter
+        
+        # Get sales data
+        sales = await db.sales.find(query).sort("completed_at", -1).to_list(1000)
+        
+        summary_data = []
+        total_amount = 0
+        total_sales = 0
+        
+        for sale in sales:
+            try:
+                sale_id = str(sale["_id"])
+                
+                # Get payment methods for this sale
+                payments = await db.payments.find({"sale_id": sale_id}).to_list(100)
+                payment_methods = []
+                
+                for payment in payments:
+                    method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
+                    if method:
+                        payment_methods.append({
+                            "method_name": method["name"],
+                            "amount": payment["amount"]
+                        })
+                
+                # Filter by payment method if specified
+                if payment_method:
+                    has_payment_method = any(pm["method_name"].lower() == payment_method.lower() for pm in payment_methods)
+                    if not has_payment_method:
+                        continue
+                
+                # Get seller name from sales_summaries or use user lookup
+                seller = "Vendeur inconnu"
+                sales_summary = await db.sales_summaries.find_one({"sale_id": sale_id})
+                if sales_summary and sales_summary.get("seller_name"):
+                    seller = sales_summary["seller_name"]
+                else:
+                    # Fallback to user lookup
+                    user = await db.users.find_one({"_id": ObjectId(sale["user_id"])})
+                    if user:
+                        seller = user["name"]
+                
+                # Filter by seller if specified
+                if seller_name and seller_name.lower() not in seller.lower():
+                    continue
+                
+                sale_data = {
+                    "sale_number": sale["sale_number"],
+                    "date": sale["completed_at"].isoformat() if sale.get("completed_at") else sale["created_at"].isoformat(),
+                    "seller_name": seller,
+                    "total_amount": sale["total_amount"],
+                    "payment_status": sale.get("payment_status", "paid"),
+                    "payment_methods": payment_methods
+                }
+                
+                summary_data.append(sale_data)
+                total_amount += sale["total_amount"]
+                total_sales += 1
+                
+            except Exception as e:
+                print(f"Error processing sale {sale.get('_id')}: {e}")
+                continue
+        
+        # Calculate summary statistics
+        average_sale = total_amount / total_sales if total_sales > 0 else 0
+        
+        # Group by payment methods
+        payment_method_stats = {}
+        for sale in summary_data:
+            for pm in sale["payment_methods"]:
+                method_name = pm["method_name"]
+                if method_name not in payment_method_stats:
+                    payment_method_stats[method_name] = {"count": 0, "amount": 0}
+                payment_method_stats[method_name]["count"] += 1
+                payment_method_stats[method_name]["amount"] += pm["amount"]
+        
+        # Group by sellers
+        seller_stats = {}
+        for sale in summary_data:
+            seller = sale["seller_name"]
+            if seller not in seller_stats:
+                seller_stats[seller] = {"count": 0, "amount": 0}
+            seller_stats[seller]["count"] += 1
+            seller_stats[seller]["amount"] += sale["total_amount"]
+        
+        return {
+            "sales": summary_data,
+            "statistics": {
+                "total_sales": total_sales,
+                "total_amount": total_amount,
+                "average_sale": average_sale,
+                "payment_methods": payment_method_stats,
+                "sellers": seller_stats
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error generating sales summary: {str(e)}")
+
+@api_router.get("/reports/purchases-summary")
+async def get_purchases_summary(
+    current_user: UserResponse = Depends(get_current_user),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    supplier_name: Optional[str] = None
+):
+    """Get purchases summary with filters"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Build query filter
+        query = {}
+        
+        # Date range filter
+        if start_date or end_date:
+            date_filter = {}
+            if start_date:
+                try:
+                    date_filter["$gte"] = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                except:
+                    date_filter["$gte"] = datetime.fromisoformat(start_date)
+            if end_date:
+                try:
+                    date_filter["$lte"] = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                except:
+                    date_filter["$lte"] = datetime.fromisoformat(end_date)
+            query["purchase_date"] = date_filter
+        
+        # Get purchases data
+        purchases = await db.purchases.find(query).sort("purchase_date", -1).to_list(1000)
+        
+        summary_data = []
+        total_amount = 0
+        total_purchases = 0
+        
+        for purchase in purchases:
+            try:
+                # Get supplier details
+                supplier = await db.suppliers.find_one({"_id": ObjectId(purchase["supplier_id"])})
+                supplier_name_actual = supplier["name"] if supplier else "Fournisseur inconnu"
+                
+                # Filter by supplier if specified
+                if supplier_name and supplier_name.lower() not in supplier_name_actual.lower():
+                    continue
+                
+                # Get purchase items count
+                items_count = await db.purchase_items.count_documents({"purchase_id": str(purchase["_id"])})
+                
+                purchase_data = {
+                    "purchase_number": purchase["purchase_number"],
+                    "date": purchase["purchase_date"].isoformat(),
+                    "supplier_name": supplier_name_actual,
+                    "invoice_number": purchase["invoice_number"],
+                    "total_amount": purchase["total_amount"],
+                    "items_count": items_count,
+                    "notes": purchase.get("notes")
+                }
+                
+                summary_data.append(purchase_data)
+                total_amount += purchase["total_amount"]
+                total_purchases += 1
+                
+            except Exception as e:
+                print(f"Error processing purchase {purchase.get('_id')}: {e}")
+                continue
+        
+        # Calculate summary statistics
+        average_purchase = total_amount / total_purchases if total_purchases > 0 else 0
+        
+        # Group by suppliers
+        supplier_stats = {}
+        for purchase in summary_data:
+            supplier = purchase["supplier_name"]
+            if supplier not in supplier_stats:
+                supplier_stats[supplier] = {"count": 0, "amount": 0}
+            supplier_stats[supplier]["count"] += 1
+            supplier_stats[supplier]["amount"] += purchase["total_amount"]
+        
+        return {
+            "purchases": summary_data,
+            "statistics": {
+                "total_purchases": total_purchases,
+                "total_amount": total_amount,
+                "average_purchase": average_purchase,
+                "suppliers": supplier_stats
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error generating purchases summary: {str(e)}")
+
+@api_router.get("/reports/dashboard")
+async def get_dashboard_stats(current_user: UserResponse = Depends(get_current_user)):
+    """Get dashboard statistics"""
+    try:
+        # Get date ranges
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        this_month_start = today.replace(day=1)
+        last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+        
+        # Sales statistics
+        total_sales = await db.sales.count_documents({"status": "completed"})
+        
+        # Sales this month
+        sales_this_month = await db.sales.find({
+            "status": "completed",
+            "completed_at": {"$gte": this_month_start}
+        }).to_list(1000)
+        
+        sales_amount_this_month = sum(sale["total_amount"] for sale in sales_this_month)
+        
+        # Sales last month
+        sales_last_month = await db.sales.find({
+            "status": "completed", 
+            "completed_at": {"$gte": last_month_start, "$lt": this_month_start}
+        }).to_list(1000)
+        
+        sales_amount_last_month = sum(sale["total_amount"] for sale in sales_last_month)
+        
+        # Products statistics
+        total_products = await db.products.count_documents({})
+        low_stock_products = await db.products.count_documents({"stock": {"$lte": 5}})
+        out_of_stock_products = await db.products.count_documents({"stock": 0})
+        
+        # Purchases statistics (only for admin/manager)
+        purchases_stats = {}
+        if current_user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+            total_purchases = await db.purchases.count_documents({})
+            
+            purchases_this_month = await db.purchases.find({
+                "purchase_date": {"$gte": this_month_start}
+            }).to_list(1000)
+            
+            purchases_amount_this_month = sum(purchase["total_amount"] for purchase in purchases_this_month)
+            
+            purchases_stats = {
+                "total_purchases": total_purchases,
+                "purchases_this_month": len(purchases_this_month),
+                "purchases_amount_this_month": purchases_amount_this_month,
+                "total_suppliers": await db.suppliers.count_documents({"is_active": True})
+            }
+        
+        # Debts statistics
+        total_debts = await db.debts.count_documents({"is_settled": False})
+        unsettled_debts = await db.debts.find({"is_settled": False}).to_list(1000)
+        total_debt_amount = sum(debt["amount"] for debt in unsettled_debts)
+        
+        # Top products by sales (this month)
+        top_products = []
+        if sales_this_month:
+            # Get sale items for this month's sales
+            sale_ids = [str(sale["_id"]) for sale in sales_this_month]
+            
+            # Aggregate sale items by product
+            pipeline = [
+                {"$match": {"sale_id": {"$in": sale_ids}}},
+                {"$group": {
+                    "_id": "$product_id",
+                    "total_quantity": {"$sum": "$quantity"},
+                    "total_revenue": {"$sum": "$total_price"}
+                }},
+                {"$sort": {"total_quantity": -1}},
+                {"$limit": 5}
+            ]
+            
+            product_stats = await db.sale_items.aggregate(pipeline).to_list(5)
+            
+            for stat in product_stats:
+                try:
+                    product = await db.products.find_one({"_id": ObjectId(stat["_id"])})
+                    if product:
+                        top_products.append({
+                            "product_name": product["name"],
+                            "quantity_sold": stat["total_quantity"],
+                            "revenue": stat["total_revenue"]
+                        })
+                except Exception as e:
+                    print(f"Error processing top product {stat['_id']}: {e}")
+                    continue
+        
+        # Calculate growth percentages
+        sales_growth = 0
+        if sales_amount_last_month > 0:
+            sales_growth = ((sales_amount_this_month - sales_amount_last_month) / sales_amount_last_month) * 100
+        
+        dashboard_data = {
+            "sales": {
+                "total_sales": total_sales,
+                "sales_this_month": len(sales_this_month),
+                "sales_amount_this_month": sales_amount_this_month,
+                "sales_amount_last_month": sales_amount_last_month,
+                "sales_growth_percentage": sales_growth
+            },
+            "products": {
+                "total_products": total_products,
+                "low_stock_products": low_stock_products,
+                "out_of_stock_products": out_of_stock_products,
+                "top_products": top_products
+            },
+            "debts": {
+                "total_unsettled_debts": total_debts,
+                "total_debt_amount": total_debt_amount
+            }
+        }
+        
+        # Add purchases data if user has permission
+        if purchases_stats:
+            dashboard_data["purchases"] = purchases_stats
+        
+        return dashboard_data
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error generating dashboard stats: {str(e)}")
+
+@api_router.get("/reports/stock-status")
+async def get_stock_status(current_user: UserResponse = Depends(get_current_user)):
+    """Get detailed stock status report"""
+    try:
+        # Get all products with stock information
+        products = await db.products.find().sort("stock", 1).to_list(1000)
+        
+        stock_report = []
+        total_value = 0
+        
+        for product in products:
+            try:
+                # Get category name
+                category = await db.categories.find_one({"_id": ObjectId(product["category_id"])})
+                category_name = category["name"] if category else "Non catégorisé"
+                
+                # Calculate stock value
+                stock_value = product["stock"] * product["purchase_price"]
+                total_value += stock_value
+                
+                # Determine stock status
+                stock_status = "Normal"
+                if product["stock"] == 0:
+                    stock_status = "Rupture"
+                elif product["stock"] <= 5:
+                    stock_status = "Faible"
+                
+                product_data = {
+                    "id": str(product["_id"]),
+                    "name": product["name"],
+                    "code": product["code"],
+                    "category": category_name,
+                    "stock": product["stock"],
+                    "purchase_price": product["purchase_price"],
+                    "selling_price": product["selling_price"],
+                    "stock_value": stock_value,
+                    "stock_status": stock_status,
+                    "image": product.get("image")
+                }
+                
+                stock_report.append(product_data)
+                
+            except Exception as e:
+                print(f"Error processing product {product.get('_id')}: {e}")
+                continue
+        
+        # Calculate summary statistics
+        total_products = len(stock_report)
+        out_of_stock = len([p for p in stock_report if p["stock_status"] == "Rupture"])
+        low_stock = len([p for p in stock_report if p["stock_status"] == "Faible"])
+        normal_stock = len([p for p in stock_report if p["stock_status"] == "Normal"])
+        
+        return {
+            "products": stock_report,
+            "summary": {
+                "total_products": total_products,
+                "total_stock_value": total_value,
+                "out_of_stock_count": out_of_stock,
+                "low_stock_count": low_stock,
+                "normal_stock_count": normal_stock
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error generating stock status report: {str(e)}")
+
+# ================================
 # Debt Management Routes
 # ================================
 
