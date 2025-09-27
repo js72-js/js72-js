@@ -677,35 +677,33 @@ async def get_sale_items(sale_id: str, current_user: UserResponse = Depends(get_
         if not sale:
             raise HTTPException(status_code=404, detail="Sale not found")
         
-        # Get sale items with product details
-        pipeline = [
-            {"$match": {"sale_id": sale_id}},
-            {"$addFields": {
-                "product_object_id": {"$toObjectId": "$product_id"}
-            }},
-            {"$lookup": {
-                "from": "products",
-                "localField": "product_object_id", 
-                "foreignField": "_id",
-                "as": "product"
-            }},
-            {"$unwind": "$product"},
-            {"$project": {
-                "id": {"$toString": "$_id"},
-                "sale_id": 1,
-                "product_id": {"$toString": "$product_id"},
-                "quantity": 1,
-                "unit_price": 1,
-                "total_price": 1,
-                "product_name": "$product.name",
-                "product_code": "$product.code",
-                "product_image": "$product.image",
-                "available_stock": "$product.stock"
-            }}
-        ]
+        # Get sale items
+        sale_items = await db.sale_items.find({"sale_id": sale_id}).to_list(100)
         
-        items = await db.sale_items.aggregate(pipeline).to_list(100)
-        return items
+        # Get product details for each item
+        result_items = []
+        for item in sale_items:
+            try:
+                product = await db.products.find_one({"_id": ObjectId(item["product_id"])})
+                if product:
+                    result_item = {
+                        "id": str(item["_id"]),
+                        "sale_id": item["sale_id"],
+                        "product_id": item["product_id"],
+                        "quantity": item["quantity"],
+                        "unit_price": item["unit_price"],
+                        "total_price": item["total_price"],
+                        "product_name": product["name"],
+                        "product_code": product["code"],
+                        "product_image": product.get("image"),
+                        "available_stock": product["stock"]
+                    }
+                    result_items.append(result_item)
+            except Exception as e:
+                print(f"Error processing item {item.get('_id')}: {e}")
+                continue
+        
+        return result_items
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
