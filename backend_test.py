@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Backend Test Suite for Phase 7 - Synchronisation Offline/Online
-Tests all sync endpoints and scenarios as requested
+Comprehensive Backend Testing for Phase 8: Role Management System
+Tests role-based access control, user management, and permissions across all endpoints
 """
 
 import requests
 import json
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict, Any, Optional
 
 # Configuration
 BASE_URL = "https://salesync-1.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@salesmanager.com"
 ADMIN_PASSWORD = "admin123"
 
-class SalesManagerSyncTester:
+class BackendTester:
     def __init__(self):
         self.base_url = BASE_URL
         self.token = None
