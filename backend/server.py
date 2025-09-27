@@ -41,9 +41,9 @@ api_router = APIRouter(prefix="/api")
 # Models
 # ================================
 
-class UserRole(str):
+class UserRole:
     ADMIN = "admin"
-    MANAGER = "gérant"
+    MANAGER = "gérant" 
     SERVER = "serveur"
 
 class User(BaseModel):
