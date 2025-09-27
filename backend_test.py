@@ -340,10 +340,23 @@ class BackendTester:
             "admin": True, "manager": True, "server": True
         })
         
-        self.test_endpoint_permissions("/products", "POST", {
-            "admin": True, "manager": True, "server": False
-        }, data={"name": "Test Product", "code": "TEST001", "category_id": "507f1f77bcf86cd799439011", 
-                "purchase_price": 10.0, "selling_price": 15.0, "stock": 100})
+        # Get a valid category ID first
+        try:
+            response = self.make_request("GET", "/categories", token=self.admin_token)
+            if response.status_code == 200:
+                categories = response.json()
+                if categories:
+                    category_id = categories[0]["id"]
+                    self.test_endpoint_permissions("/products", "POST", {
+                        "admin": True, "manager": True, "server": False
+                    }, data={"name": "Test Product", "code": f"TEST{int(time.time())}", "category_id": category_id, 
+                            "purchase_price": 10.0, "selling_price": 15.0, "stock": 100})
+                else:
+                    self.log_test("POST /products - No Categories Available", False, "No categories found for product creation")
+            else:
+                self.log_test("POST /products - Category Fetch Failed", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("POST /products - Category Fetch Error", False, f"Exception: {str(e)}")
         
         # Test Categories endpoints
         self.test_endpoint_permissions("/categories", "GET", {
