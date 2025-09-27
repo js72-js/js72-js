@@ -161,6 +161,20 @@ backend:
       - working: true
         agent: "testing"
         comment: "TESTS PHASE 4 BACKEND COMPLETS - TOUS RÉUSSIS ✅ API Paiement et Finalisation 100% FONCTIONNELLE. Tests 16/16 passés: 1) GET /api/payment-methods retourne 4 méthodes (Espèces, Carte bancaire, Mobile Money, Chèque). 2) POST /api/sales/{id}/complete avec paiement complet (100%) et partiel (60%) + dette. 3) POST /api/sales/{id}/debt et PATCH /api/debts/{id}/settle pour gestion dettes. 4) GET /api/debts liste toutes les dettes. 5) GET /api/sales/history avec pagination et détails paiements. 6) Validations critiques: empêche double finalisation, surpaiement, méthodes invalides. 7) Décrémentation automatique stock lors finalisation. CORRECTION APPLIQUÉE: Route /sales/history déplacée avant /sales/{sale_id} pour éviter conflit FastAPI. Workflow complet paiement et finalisation production-ready."
+  - task: "Gestion des Achats - Backend"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Phase 5 Backend implémentée: API complète gestion achats avec CRUD fournisseurs (/suppliers GET/POST/PUT/DELETE), génération numéro achat unique (ACH+timestamp), gestion achats (/purchases POST/GET), articles d'achat (/purchases/{id}/items GET/POST), finalisation avec mise à jour stock (/purchases/{id}/finalize). Permissions admin/gérant uniquement. Prête pour tests."
+      - working: true
+        agent: "testing"
+        comment: "TESTS PHASE 5 BACKEND COMPLETS - TOUS RÉUSSIS ✅ API Gestion des Achats 100% FONCTIONNELLE. Tests 42/42 passés: 1) CRUD Fournisseurs complet: GET/POST/PUT/DELETE avec nom unique et désactivation. 2) Génération numéro achat unique (ACH+timestamp) avec vérification unicité. 3) CRUD Achats complet: POST/GET avec détails fournisseurs. 4) CRUD Articles d'achat: GET/POST avec détails produits et calculs totaux automatiques. 5) Finalisation achat avec mise à jour stock automatique (incrémentation). 6) Permissions parfaites: admin/gérant accès complet, serveur refusé (403). 7) Workflow complet testé: création fournisseur → création achat → ajout produits → vérification totaux → finalisation → vérification stock. API achats production-ready."
 
 frontend:
   - task: "Infrastructure et Authentification"
