@@ -146,7 +146,18 @@ backend:
         comment: "Phase 3 Backend implémentée: API ventes (/sales POST, GET/pending, PATCH/status), génération numéro unique, gestion panier (/sales/{id}/items GET/POST/PUT/DELETE), calcul automatique totaux, mise en attente, vérifications stock. Prête pour tests."
       - working: true
         agent: "testing"
-        comment: "TESTS PHASE 3 BACKEND COMPLETS - API VENTES ET PANIER 100% FONCTIONNELLE ✅ SUCCÈS TOTAL (14/14 tests): 1) API Ventes: génération numéro unique VTE+timestamp, création vente, récupération vente, changement statut (pending→on_hold), liste ventes en attente - TOUS FONCTIONNELS. 2) API Panier: ajout produits au panier, récupération items avec détails produits (JOIN), modification quantités, suppression items - TOUS FONCTIONNELS. 3) Fonctionnalités critiques: vérification stock (impossible d'ajouter plus que disponible), calcul automatique totaux vente, gestion quantités avec contrôles - TOUS FONCTIONNELS. CORRECTION APPLIQUÉE: Fix aggregation MongoDB pour récupération items panier avec détails produits (conversion ObjectId). Backend Phase 3 production-ready, flow complet de vente testé avec succès."
+        comment: "TESTS PHASE 3 BACKEND COMPLETS - TOUS RÉUSSIS ✅ Système de Vente (Panier) 100% fonctionnel. Tests 14/14 passés: génération numéro unique (VTE+timestamp), création/récupération ventes, mise en attente, gestion panier complète (CRUD), vérifications stock automatiques, calculs totaux dynamiques, gestion quantités avec validations. Correction appliquée: MongoDB aggregation pour récupération articles panier avec détails produits. API ventes et panier production-ready."
+  - task: "Paiement et Finalisation - Backend"
+    implemented: true
+    working: false
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Phase 4 Backend implémentée: API paiement multi-modes (/payment-methods), finalisation vente (/sales/{id}/complete), gestion dettes (/sales/{id}/debt, /debts), mise à jour stock automatique, historique ventes (/sales/history), recapitulatifs avec méthodes paiement. Prête pour tests."
 
 frontend:
   - task: "Infrastructure et Authentification"
