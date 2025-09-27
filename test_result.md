@@ -244,7 +244,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Gestion des Achats - Backend"
+    - "Rapports et Récapitulatifs - Backend"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
