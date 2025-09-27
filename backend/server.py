@@ -517,6 +517,8 @@ async def update_category(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid category ID")
         raise HTTPException(status_code=400, detail="Invalid category ID")
 
 @api_router.delete("/categories/{category_id}")
