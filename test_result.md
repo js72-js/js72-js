@@ -149,15 +149,18 @@ backend:
         comment: "TESTS PHASE 3 BACKEND COMPLETS - TOUS RÉUSSIS ✅ Système de Vente (Panier) 100% fonctionnel. Tests 14/14 passés: génération numéro unique (VTE+timestamp), création/récupération ventes, mise en attente, gestion panier complète (CRUD), vérifications stock automatiques, calculs totaux dynamiques, gestion quantités avec validations. Correction appliquée: MongoDB aggregation pour récupération articles panier avec détails produits. API ventes et panier production-ready."
   - task: "Paiement et Finalisation - Backend"
     implemented: true
-    working: false
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: false
         agent: "main"
         comment: "Phase 4 Backend implémentée: API paiement multi-modes (/payment-methods), finalisation vente (/sales/{id}/complete), gestion dettes (/sales/{id}/debt, /debts), mise à jour stock automatique, historique ventes (/sales/history), recapitulatifs avec méthodes paiement. Prête pour tests."
+      - working: true
+        agent: "testing"
+        comment: "TESTS PHASE 4 BACKEND COMPLETS - TOUS RÉUSSIS ✅ API Paiement et Finalisation 100% FONCTIONNELLE. Tests 16/16 passés: 1) GET /api/payment-methods retourne 4 méthodes (Espèces, Carte bancaire, Mobile Money, Chèque). 2) POST /api/sales/{id}/complete avec paiement complet (100%) et partiel (60%) + dette. 3) POST /api/sales/{id}/debt et PATCH /api/debts/{id}/settle pour gestion dettes. 4) GET /api/debts liste toutes les dettes. 5) GET /api/sales/history avec pagination et détails paiements. 6) Validations critiques: empêche double finalisation, surpaiement, méthodes invalides. 7) Décrémentation automatique stock lors finalisation. CORRECTION APPLIQUÉE: Route /sales/history déplacée avant /sales/{sale_id} pour éviter conflit FastAPI. Workflow complet paiement et finalisation production-ready."
 
 frontend:
   - task: "Infrastructure et Authentification"
