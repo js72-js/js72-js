@@ -41,10 +41,11 @@ export default function SyncScreen() {
 
   const loadSyncStatus = async () => {
     try {
-      const networkStatus = OfflineStorageService.getNetworkStatus();
-      const pendingCount = await OfflineStorageService.getPendingSyncCount();
-      const lastSyncTime = await OfflineStorageService.getLastSyncTime();
-      const sales = await OfflineStorageService.getOfflineSales();
+      const offlineStorage = OfflineStorageClass.getInstance();
+      const networkStatus = offlineStorage.getNetworkStatus();
+      const pendingCount = await offlineStorage.getPendingSyncCount();
+      const lastSyncTime = await offlineStorage.getLastSyncTime();
+      const sales = await offlineStorage.getOfflineSales();
 
       setSyncStatus({
         isOnline: networkStatus.isConnected && networkStatus.isInternetReachable !== false,
