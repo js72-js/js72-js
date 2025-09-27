@@ -61,11 +61,20 @@ class OfflineStorageService {
 
   constructor() {
     this.initializeNetworkListener();
-    this.initializeDeviceId();
+    // Don't initialize device ID in constructor to avoid SSR issues
   }
 
-  private async initializeDeviceId() {
+  private async ensureDeviceId() {
+    if (this.deviceId) return this.deviceId;
+    
     try {
+      // Check if we're in a browser environment
+      if (typeof window === 'undefined') {
+        // Running in SSR/Node environment, use fallback
+        this.deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return this.deviceId;
+      }
+      
       let deviceId = await AsyncStorage.getItem(DEVICE_ID_KEY);
       if (!deviceId) {
         deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -77,6 +86,8 @@ class OfflineStorageService {
       // Fallback device ID if AsyncStorage fails
       this.deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
+    
+    return this.deviceId;
   }
 
   private initializeNetworkListener() {
