@@ -119,6 +119,17 @@ backend:
       - working: true
         agent: "testing"
         comment: "TESTS COMPLETS RÉUSSIS - Tous les endpoints testés avec succès: 1) /api/setup/init crée admin par défaut (admin@salesmanager.com/admin123) et catégories par défaut (Boissons, Alimentaire, Hygiène) et méthodes de paiement. 2) /api/auth/login fonctionne avec JWT token valide. 3) /api/auth/me endpoint protégé accessible avec token. 4) /api/auth/register crée nouveaux utilisateurs avec bon rôle. 5) /api/categories retourne catégories par défaut. 6) Gestion d'erreurs correcte (401 pour mauvais credentials, 403 pour accès non autorisé). PROBLÈME RÉSOLU: bcrypt v5.0.0 incompatible, downgrade vers v4.1.3 effectué. Backend 100% fonctionnel."
+  - task: "Gestion des Produits - Backend"
+    implemented: true
+    working: false
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Phase 2 Backend implémentée: API complète produits CRUD (/products GET/POST/PUT/DELETE), gestion stock, upload images base64, CRUD catégories complet, vérifications permissions admin/gérant. Prête pour tests."
 
 frontend:
   - task: "Infrastructure et Authentification"
