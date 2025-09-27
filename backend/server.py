@@ -1137,32 +1137,47 @@ async def get_sales_history(
 ):
     """Get sales history with pagination"""
     try:
+        print(f"Sales history called by user: {current_user.email}")
+        
         # Get completed sales with pagination
         sales = await db.sales.find(
             {"status": "completed"}
         ).sort("completed_at", -1).skip(offset).limit(limit).to_list(limit)
         
+        print(f"Found {len(sales)} completed sales")
+        
+        if len(sales) == 0:
+            return []
+        
         result = []
-        for sale in sales:
+        for i, sale in enumerate(sales):
             try:
+                print(f"Processing sale {i+1}: {sale.get('sale_number', 'unknown')}")
+                
                 # Ensure we have the correct sale_id format
                 sale_id = str(sale["_id"]) if "_id" in sale else sale.get("id", "")
+                print(f"Sale ID: {sale_id}")
                 
                 # Get sale items count
                 items_count = await db.sale_items.count_documents({"sale_id": sale_id})
+                print(f"Items count: {items_count}")
                 
                 # Get payments
                 payments = await db.payments.find({"sale_id": sale_id}).to_list(100)
+                print(f"Found {len(payments)} payments")
+                
                 payment_methods = []
                 
-                for payment in payments:
+                for j, payment in enumerate(payments):
                     try:
+                        print(f"Processing payment {j+1}: method_id={payment.get('payment_method_id')}")
                         method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
                         if method:
                             payment_methods.append({
                                 "method_name": method["name"],
                                 "amount": payment["amount"]
                             })
+                            print(f"Added payment method: {method['name']}")
                     except Exception as e:
                         print(f"Error processing payment method {payment.get('payment_method_id')}: {e}")
                         continue
@@ -1178,14 +1193,19 @@ async def get_sales_history(
                     "payment_methods": payment_methods
                 }
                 result.append(sale_data)
+                print(f"Successfully processed sale {sale['sale_number']}")
+                
             except Exception as e:
                 print(f"Error processing sale {sale.get('_id', 'unknown')}: {e}")
                 continue
         
+        print(f"Returning {len(result)} sales")
         return result
         
     except Exception as e:
         print(f"Sales history error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Error fetching sales history: {str(e)}")
 
 @api_router.get("/debts")
