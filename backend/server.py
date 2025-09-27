@@ -439,6 +439,8 @@ async def delete_product(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
 @api_router.patch("/products/{product_id}/stock")
