@@ -143,6 +143,17 @@ frontend:
       - working: false
         agent: "main"
         comment: "Frontend créé avec splash screen 20s, écran login, dashboard avec navigation selon rôles. AuthContext implémenté. Besoin de tester le flow complet."
+  - task: "Gestion des Produits - Frontend"
+    implemented: true
+    working: false
+    file: "app/products/index.tsx, app/products/add.tsx, app/products/edit.tsx, app/categories/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Phase 2 Frontend implémentée: Liste produits avec filtrage par catégorie, recherche, ajout/édition produits avec upload images (caméra/galerie), gestion stock, CRUD catégories avec modal, design mobile-friendly avec React Native components. Prêt pour tests."
 
 metadata:
   created_by: "main_agent"
