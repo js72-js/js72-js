@@ -205,15 +205,18 @@ backend:
         comment: "TESTS PHASE 7 BACKEND COMPLETS - EXCELLENTS RÉSULTATS ✅ API SYNCHRONISATION OFFLINE/ONLINE 93.3% FONCTIONNELLE (14/15 tests). SUCCÈS: 1) POST /api/sync/upload: sync ventes complètes avec items/paiements, sync produits avec détection conflits timestamp, sync achats avec items et stock. 2) Détection conflits parfaite: sales/purchases existants (sync_id/numéros), produits modifiés côté serveur. 3) GET /api/sync/download: tous types données (products/categories/payment_methods/suppliers), filtres date/types fonctionnels, permissions respectées (serveur sans suppliers). 4) GET /api/sync/status: statistiques détaillées par device_id, audit complet (success/conflict/error counts). 5) Gestion erreurs: données invalides, types non supportés correctement rejetés. 6) Batch processing: traitement multiple items simultanés. ÉCHEC MINEUR: conflit purchase number dans batch (acceptable - logique métier correcte). API sync production-ready avec audit complet."
   - task: "Gestion des Rôles - Backend"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Phase 8 Backend implémentée: Système complet de gestion des rôles avec fonctions d'autorisation réutilisables (require_admin, require_admin_or_manager, require_any_role), API gestion utilisateurs (/users GET, PATCH /users/{id}/role, DELETE /users/{id}), endpoint disponibilité rôles (/roles), refactorisation complète permissions sur tous endpoints existants. Permissions: ADMIN (accès complet), MANAGER (ventes+achats), SERVEUR (ventes uniquement). Prêt pour tests."
+      - working: true
+        agent: "testing"
+        comment: "TESTS PHASE 8 BACKEND COMPLETS - TOUS RÉUSSIS ✅ SYSTÈME DE GESTION DES RÔLES 100% FONCTIONNEL. Tests 59/59 passés (100%): 1) Authentification admin et création utilisateurs test réussies. 2) API Rôles (/api/roles) accessible par tous les rôles authentifiés avec 3 rôles disponibles (admin, gérant, serveur). 3) API Gestion Utilisateurs: GET /api/users réservé admin uniquement, PATCH /api/users/{id}/role et DELETE /api/users/{id} fonctionnels avec validation rôles. 4) Auto-protection: admin ne peut pas modifier son propre rôle ou se désactiver. 5) Permissions cross-endpoints parfaites: ADMIN (accès total), MANAGER (ventes+achats), SERVEUR (ventes uniquement). 6) Authentification JWT requise sur tous endpoints. 7) Validation données: rôles invalides rejetés, utilisateurs inexistants gérés. CORRECTION APPLIQUÉE: POST /categories manquait require_admin_or_manager, ajouté. Système de gestion des rôles production-ready avec sécurité complète."
 
 frontend:
   - task: "Infrastructure et Authentification"
