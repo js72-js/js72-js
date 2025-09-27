@@ -526,12 +526,8 @@ async def create_product(
     product_data: ProductCreate, 
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     # Check if category exists
     try:
@@ -563,12 +559,8 @@ async def update_product(
     product_data: ProductCreate,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Check if product exists
@@ -619,12 +611,8 @@ async def delete_product(
     product_id: str, 
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         result = await db.products.delete_one({"_id": ObjectId(product_id)})
@@ -645,12 +633,8 @@ async def update_product_stock(
     stock_data: dict,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         new_stock = stock_data.get("stock")
@@ -688,12 +672,8 @@ async def update_category(
     category_data: CategoryCreate,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         result = await db.categories.update_one(
@@ -722,12 +702,8 @@ async def delete_category(
     category_id: str,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Check if category has products
@@ -1387,12 +1363,8 @@ async def create_sales_summary(sale_id: str, seller_name: str):
 @api_router.get("/suppliers", response_model=List[Supplier])
 async def get_suppliers(current_user: UserResponse = Depends(get_current_user)):
     """Get all active suppliers"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     suppliers = await db.suppliers.find({"is_active": True}).sort("name", 1).to_list(1000)
     for supplier in suppliers:
@@ -1406,12 +1378,8 @@ async def create_supplier(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Create new supplier"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     # Check if supplier name already exists
     existing_supplier = await db.suppliers.find_one({"name": supplier_data.name})
@@ -1436,12 +1404,8 @@ async def update_supplier(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Update supplier"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Check if supplier name conflicts with another supplier
@@ -1480,12 +1444,8 @@ async def delete_supplier(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Deactivate supplier"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         result = await db.suppliers.update_one(
@@ -1512,12 +1472,8 @@ async def delete_supplier(
 @api_router.post("/purchases/generate-number")
 async def generate_purchase_number(current_user: UserResponse = Depends(get_current_user)):
     """Generate unique purchase number"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     import time
     timestamp = str(int(time.time() * 1000))[-8:]  # Last 8 digits of timestamp
@@ -1537,12 +1493,8 @@ async def create_purchase(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Create new purchase"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Verify supplier exists
@@ -1587,12 +1539,8 @@ async def get_purchases(
     offset: int = 0
 ):
     """Get purchases with supplier details"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         purchases = await db.purchases.find().sort("purchase_date", -1).skip(offset).limit(limit).to_list(limit)
@@ -1633,12 +1581,8 @@ async def get_purchase(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Get specific purchase"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
@@ -1666,12 +1610,8 @@ async def get_purchase_items(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Get all items in a purchase"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Verify purchase exists
@@ -1719,12 +1659,8 @@ async def add_item_to_purchase(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Add item to purchase"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Verify purchase exists
@@ -1801,12 +1737,8 @@ async def finalize_purchase(
     current_user: UserResponse = Depends(get_current_user)
 ):
     """Finalize purchase and update product stocks"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Get purchase items
@@ -2003,12 +1935,8 @@ async def get_purchases_summary(
     supplier_name: Optional[str] = None
 ):
     """Get purchases summary with filters"""
-    # Check if user has permission (admin or manager)
-    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Check permissions
+    require_admin_or_manager(current_user)
     
     try:
         # Build query filter
