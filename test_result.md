@@ -269,7 +269,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Synchronisation Offline/Online - Backend"
+    - "Gestion des Rôles - Backend"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
