@@ -555,6 +555,375 @@ async def delete_category(
         raise HTTPException(status_code=400, detail="Invalid category ID")
 
 # ================================
+# Sales and Cart Routes
+# ================================
+
+@api_router.post("/sales/generate-number")
+async def generate_sale_number(current_user: UserResponse = Depends(get_current_user)):
+    """Generate unique sale number"""
+    import time
+    timestamp = str(int(time.time() * 1000))[-8:]  # Last 8 digits of timestamp
+    sale_number = f"VTE{timestamp}"
+    
+    # Ensure uniqueness
+    while await db.sales.find_one({"sale_number": sale_number}):
+        time.sleep(0.001)
+        timestamp = str(int(time.time() * 1000))[-8:]
+        sale_number = f"VTE{timestamp}"
+    
+    return {"sale_number": sale_number}
+
+@api_router.post("/sales", response_model=Sale)
+async def create_sale(current_user: UserResponse = Depends(get_current_user)):
+    """Create new sale with generated number"""
+    # Generate unique sale number
+    number_response = await generate_sale_number(current_user)
+    sale_number = number_response["sale_number"]
+    
+    sale = Sale(
+        sale_number=sale_number,
+        user_id=current_user.id,
+        status="pending",
+        total_amount=0.0,
+        payment_status="pending"
+    )
+    
+    sale_dict = sale.dict()
+    sale_dict["_id"] = ObjectId(sale_dict["id"])
+    del sale_dict["id"]
+    
+    result = await db.sales.insert_one(sale_dict)
+    sale_dict["id"] = str(result.inserted_id)
+    del sale_dict["_id"]
+    
+    return Sale(**sale_dict)
+
+@api_router.get("/sales/pending", response_model=List[Sale])
+async def get_pending_sales(current_user: UserResponse = Depends(get_current_user)):
+    """Get all pending and on_hold sales"""
+    sales = await db.sales.find({
+        "status": {"$in": ["pending", "on_hold"]}
+    }).sort("created_at", -1).to_list(100)
+    
+    for sale in sales:
+        sale["id"] = str(sale["_id"])
+        del sale["_id"]
+    
+    return [Sale(**sale) for sale in sales]
+
+@api_router.get("/sales/{sale_id}", response_model=Sale)
+async def get_sale(sale_id: str, current_user: UserResponse = Depends(get_current_user)):
+    """Get specific sale"""
+    try:
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        sale["id"] = str(sale["_id"])
+        del sale["_id"]
+        return Sale(**sale)
+    except Exception as e:
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid sale ID")
+        raise HTTPException(status_code=400, detail="Invalid sale ID")
+
+@api_router.patch("/sales/{sale_id}/status")
+async def update_sale_status(
+    sale_id: str,
+    status_data: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Update sale status"""
+    try:
+        new_status = status_data.get("status")
+        if new_status not in ["pending", "on_hold", "completed"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        
+        update_data = {"status": new_status}
+        if new_status == "completed":
+            update_data["completed_at"] = datetime.utcnow()
+        
+        result = await db.sales.update_one(
+            {"_id": ObjectId(sale_id)},
+            {"$set": update_data}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        # Return updated sale
+        updated_sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        updated_sale["id"] = str(updated_sale["_id"])
+        del updated_sale["_id"]
+        
+        return Sale(**updated_sale)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid sale ID")
+        raise HTTPException(status_code=400, detail="Invalid sale ID")
+
+# ================================
+# Sale Items Routes (Cart Management)
+# ================================
+
+@api_router.get("/sales/{sale_id}/items", response_model=List[dict])
+async def get_sale_items(sale_id: str, current_user: UserResponse = Depends(get_current_user)):
+    """Get all items in a sale (cart)"""
+    try:
+        # Verify sale exists
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        # Get sale items with product details
+        pipeline = [
+            {"$match": {"sale_id": sale_id}},
+            {"$lookup": {
+                "from": "products",
+                "localField": "product_id", 
+                "foreignField": "_id",
+                "as": "product"
+            }},
+            {"$unwind": "$product"},
+            {"$project": {
+                "id": {"$toString": "$_id"},
+                "sale_id": 1,
+                "product_id": 1,
+                "quantity": 1,
+                "unit_price": 1,
+                "total_price": 1,
+                "product_name": "$product.name",
+                "product_code": "$product.code",
+                "product_image": "$product.image",
+                "available_stock": "$product.stock"
+            }}
+        ]
+        
+        items = await db.sale_items.aggregate(pipeline).to_list(100)
+        return items
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid sale ID")
+        raise HTTPException(status_code=400, detail="Invalid sale ID")
+
+@api_router.post("/sales/{sale_id}/items")
+async def add_item_to_sale(
+    sale_id: str,
+    item_data: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Add item to sale (cart)"""
+    try:
+        product_id = item_data.get("product_id")
+        quantity = item_data.get("quantity", 1)
+        
+        if not product_id or quantity <= 0:
+            raise HTTPException(status_code=400, detail="Invalid product or quantity")
+        
+        # Verify sale exists and is editable
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        if sale["status"] == "completed":
+            raise HTTPException(status_code=400, detail="Cannot modify completed sale")
+        
+        # Get product details and check stock
+        try:
+            product = await db.products.find_one({"_id": ObjectId(product_id)})
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid product ID")
+        
+        if product["stock"] < quantity:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Insufficient stock. Available: {product['stock']}"
+            )
+        
+        # Check if item already exists in sale
+        existing_item = await db.sale_items.find_one({
+            "sale_id": sale_id,
+            "product_id": product_id
+        })
+        
+        if existing_item:
+            # Update existing item
+            new_quantity = existing_item["quantity"] + quantity
+            if product["stock"] < new_quantity:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Insufficient stock. Available: {product['stock']}"
+                )
+            
+            new_total = new_quantity * product["selling_price"]
+            
+            await db.sale_items.update_one(
+                {"_id": existing_item["_id"]},
+                {"$set": {
+                    "quantity": new_quantity,
+                    "total_price": new_total
+                }}
+            )
+            
+            item_dict = {
+                "id": str(existing_item["_id"]),
+                "sale_id": sale_id,
+                "product_id": product_id,
+                "quantity": new_quantity,
+                "unit_price": product["selling_price"],
+                "total_price": new_total
+            }
+        else:
+            # Create new item
+            sale_item = SaleItem(
+                sale_id=sale_id,
+                product_id=product_id,
+                quantity=quantity,
+                unit_price=product["selling_price"],
+                total_price=quantity * product["selling_price"]
+            )
+            
+            item_dict = sale_item.dict()
+            item_dict["_id"] = ObjectId(item_dict["id"])
+            del item_dict["id"]
+            
+            result = await db.sale_items.insert_one(item_dict)
+            item_dict["id"] = str(result.inserted_id)
+            del item_dict["_id"]
+        
+        # Update sale total
+        await update_sale_total(sale_id)
+        
+        return item_dict
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid ID")
+        raise HTTPException(status_code=400, detail="Error adding item to sale")
+
+@api_router.put("/sales/{sale_id}/items/{item_id}")
+async def update_sale_item(
+    sale_id: str,
+    item_id: str,
+    item_data: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Update sale item quantity"""
+    try:
+        new_quantity = item_data.get("quantity")
+        if new_quantity is None or new_quantity < 0:
+            raise HTTPException(status_code=400, detail="Invalid quantity")
+        
+        # Get sale item
+        sale_item = await db.sale_items.find_one({"_id": ObjectId(item_id)})
+        if not sale_item:
+            raise HTTPException(status_code=404, detail="Sale item not found")
+        
+        # Get product to check stock
+        product = await db.products.find_one({"_id": ObjectId(sale_item["product_id"])})
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        if new_quantity == 0:
+            # Remove item
+            await db.sale_items.delete_one({"_id": ObjectId(item_id)})
+            await update_sale_total(sale_id)
+            return {"message": "Item removed from sale"}
+        else:
+            # Check stock
+            if product["stock"] < new_quantity:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Insufficient stock. Available: {product['stock']}"
+                )
+            
+            # Update item
+            new_total = new_quantity * sale_item["unit_price"]
+            
+            await db.sale_items.update_one(
+                {"_id": ObjectId(item_id)},
+                {"$set": {
+                    "quantity": new_quantity,
+                    "total_price": new_total
+                }}
+            )
+            
+            await update_sale_total(sale_id)
+            
+            return {
+                "id": item_id,
+                "sale_id": sale_id,
+                "product_id": sale_item["product_id"],
+                "quantity": new_quantity,
+                "unit_price": sale_item["unit_price"],
+                "total_price": new_total
+            }
+            
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid ID")
+        raise HTTPException(status_code=400, detail="Error updating sale item")
+
+@api_router.delete("/sales/{sale_id}/items/{item_id}")
+async def remove_sale_item(
+    sale_id: str,
+    item_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Remove item from sale"""
+    try:
+        result = await db.sale_items.delete_one({"_id": ObjectId(item_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Sale item not found")
+        
+        await update_sale_total(sale_id)
+        return {"message": "Item removed from sale"}
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid ID")
+        raise HTTPException(status_code=400, detail="Error removing sale item")
+
+# Helper function to update sale total
+async def update_sale_total(sale_id: str):
+    """Calculate and update sale total amount"""
+    try:
+        # Calculate total from sale items
+        pipeline = [
+            {"$match": {"sale_id": sale_id}},
+            {"$group": {
+                "_id": None,
+                "total": {"$sum": "$total_price"}
+            }}
+        ]
+        
+        result = list(await db.sale_items.aggregate(pipeline).to_list(1))
+        total_amount = result[0]["total"] if result else 0.0
+        
+        # Update sale
+        await db.sales.update_one(
+            {"_id": ObjectId(sale_id)},
+            {"$set": {"total_amount": total_amount}}
+        )
+        
+        return total_amount
+    except Exception as e:
+        print(f"Error updating sale total: {e}")
+        return 0.0
+
+# ================================
 # Initial Setup Routes
 # ================================
 
