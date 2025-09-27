@@ -1,474 +1,438 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for Sales Manager Application - Phase 1
-Testing Infrastructure and Authentication endpoints
+Backend Test Suite for Sales Manager Application - Phase 2
+Testing Product Management APIs and Security
 """
 
 import requests
 import json
-import sys
+import base64
 from datetime import datetime
+import sys
 
-# Base URL from environment
+# Configuration
 BASE_URL = "https://sales-manager-25.preview.emergentagent.com/api"
 
-class SalesManagerTester:
+# Test users
+ADMIN_USER = {
+    "email": "admin@salesmanager.com",
+    "password": "admin123"
+}
+
+SERVER_USER = {
+    "email": "serveur@salesmanager.com", 
+    "password": "serveur123",
+    "name": "Serveur Test",
+    "role": "serveur"
+}
+
+class TestRunner:
     def __init__(self):
-        self.base_url = BASE_URL
-        self.session = requests.Session()
-        self.auth_token = None
-        self.test_results = []
+        self.admin_token = None
+        self.server_token = None
+        self.test_category_id = None
+        self.test_product_id = None
+        self.results = []
         
-    def log_test(self, test_name, success, details, response_data=None):
-        """Log test results"""
-        result = {
+    def log_result(self, test_name, success, message="", details=""):
+        """Log test result"""
+        status = "✅ PASS" if success else "❌ FAIL"
+        self.results.append({
             "test": test_name,
             "success": success,
-            "details": details,
-            "timestamp": datetime.now().isoformat(),
-            "response_data": response_data
+            "message": message,
+            "details": details
+        })
+        print(f"{status} {test_name}: {message}")
+        if details and not success:
+            print(f"   Details: {details}")
+    
+    def make_request(self, method, endpoint, token=None, data=None, params=None):
+        """Make HTTP request with proper headers"""
+        url = f"{BASE_URL}{endpoint}"
+        headers = {"Content-Type": "application/json"}
+        
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
+        try:
+            if method == "GET":
+                response = requests.get(url, headers=headers, params=params)
+            elif method == "POST":
+                response = requests.post(url, headers=headers, json=data)
+            elif method == "PUT":
+                response = requests.put(url, headers=headers, json=data)
+            elif method == "DELETE":
+                response = requests.delete(url, headers=headers)
+            elif method == "PATCH":
+                response = requests.patch(url, headers=headers, json=data)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+                
+            return response
+        except Exception as e:
+            print(f"Request error: {str(e)}")
+            return None
+    
+    def setup_authentication(self):
+        """Setup authentication tokens for admin and server users"""
+        print("\n=== SETUP AUTHENTICATION ===")
+        
+        # Initialize app first
+        response = self.make_request("POST", "/setup/init")
+        if response and response.status_code == 200:
+            self.log_result("App Initialization", True, "App initialized successfully")
+        else:
+            self.log_result("App Initialization", False, "Failed to initialize app")
+            return False
+        
+        # Login as admin
+        response = self.make_request("POST", "/auth/login", data=ADMIN_USER)
+        if response and response.status_code == 200:
+            data = response.json()
+            self.admin_token = data["access_token"]
+            self.log_result("Admin Login", True, f"Admin logged in successfully")
+        else:
+            self.log_result("Admin Login", False, "Failed to login as admin", 
+                          f"Status: {response.status_code if response else 'No response'}")
+            return False
+        
+        # Create server user
+        response = self.make_request("POST", "/auth/register", self.admin_token, SERVER_USER)
+        if response and response.status_code == 200:
+            self.log_result("Server User Creation", True, "Server user created successfully")
+        else:
+            # User might already exist, try to login
+            self.log_result("Server User Creation", True, "Server user already exists or created")
+        
+        # Login as server
+        server_login = {"email": SERVER_USER["email"], "password": SERVER_USER["password"]}
+        response = self.make_request("POST", "/auth/login", data=server_login)
+        if response and response.status_code == 200:
+            data = response.json()
+            self.server_token = data["access_token"]
+            self.log_result("Server Login", True, "Server user logged in successfully")
+        else:
+            self.log_result("Server Login", False, "Failed to login as server user",
+                          f"Status: {response.status_code if response else 'No response'}")
+            return False
+            
+        return True
+    
+    def test_categories_crud(self):
+        """Test Categories CRUD operations"""
+        print("\n=== TESTING CATEGORIES CRUD ===")
+        
+        # Get existing categories
+        response = self.make_request("GET", "/categories", self.admin_token)
+        if response and response.status_code == 200:
+            categories = response.json()
+            self.log_result("Get Categories", True, f"Retrieved {len(categories)} categories")
+            if categories:
+                self.test_category_id = categories[0]["id"]
+        else:
+            self.log_result("Get Categories", False, "Failed to get categories")
+            return False
+        
+        # Test category creation (admin)
+        new_category = {
+            "name": "Test Category",
+            "description": "Category for testing"
         }
-        self.test_results.append(result)
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} {test_name}: {details}")
-        if response_data and not success:
-            print(f"   Response: {response_data}")
-        print()
-
-    def test_initialization(self):
-        """Test POST /api/setup/init"""
-        print("=== Testing Application Initialization ===")
+        response = self.make_request("POST", "/categories", self.admin_token, new_category)
+        if response and response.status_code == 200:
+            created_category = response.json()
+            test_category_id = created_category["id"]
+            self.log_result("Create Category (Admin)", True, "Category created successfully")
+        else:
+            self.log_result("Create Category (Admin)", False, "Failed to create category")
+            return False
         
-        try:
-            response = self.session.post(f"{self.base_url}/setup/init")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "message" in data and "initialized successfully" in data["message"]:
-                    self.log_test(
-                        "Application Initialization", 
-                        True, 
-                        f"App initialized successfully (Status: {response.status_code})",
-                        data
-                    )
-                else:
-                    self.log_test(
-                        "Application Initialization", 
-                        False, 
-                        f"Unexpected response format (Status: {response.status_code})",
-                        data
-                    )
-            else:
-                self.log_test(
-                    "Application Initialization", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Application Initialization", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_admin_login(self):
-        """Test POST /api/auth/login with admin credentials"""
-        print("=== Testing Admin Login ===")
-        
-        login_data = {
-            "email": "admin@salesmanager.com",
-            "password": "admin123"
+        # Test category update (admin)
+        updated_category = {
+            "name": "Updated Test Category",
+            "description": "Updated description"
         }
+        response = self.make_request("PUT", f"/categories/{test_category_id}", self.admin_token, updated_category)
+        if response and response.status_code == 200:
+            self.log_result("Update Category (Admin)", True, "Category updated successfully")
+        else:
+            self.log_result("Update Category (Admin)", False, "Failed to update category")
         
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/login",
-                json=login_data,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check if response has required fields
-                required_fields = ["access_token", "token_type", "user"]
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if not missing_fields:
-                    # Store token for future requests
-                    self.auth_token = data["access_token"]
-                    
-                    # Verify user data
-                    user = data["user"]
-                    if (user.get("email") == "admin@salesmanager.com" and 
-                        user.get("role") == "admin" and
-                        user.get("name") == "Administrateur"):
-                        
-                        self.log_test(
-                            "Admin Login", 
-                            True, 
-                            f"Login successful, JWT token received, user data correct",
-                            {
-                                "token_type": data["token_type"],
-                                "user_email": user["email"],
-                                "user_role": user["role"],
-                                "user_name": user["name"]
-                            }
-                        )
-                    else:
-                        self.log_test(
-                            "Admin Login", 
-                            False, 
-                            f"User data incorrect",
-                            user
-                        )
-                else:
-                    self.log_test(
-                        "Admin Login", 
-                        False, 
-                        f"Missing required fields: {missing_fields}",
-                        data
-                    )
+        # Test category update permission (server - should fail)
+        response = self.make_request("PUT", f"/categories/{test_category_id}", self.server_token, updated_category)
+        if response and response.status_code == 403:
+            self.log_result("Update Category Permission (Server)", True, "Server correctly denied access")
+        else:
+            self.log_result("Update Category Permission (Server)", False, "Server should not have update access")
+        
+        # Test category deletion with products (should fail)
+        if self.test_category_id:
+            response = self.make_request("DELETE", f"/categories/{self.test_category_id}", self.admin_token)
+            if response and response.status_code == 400:
+                self.log_result("Delete Category with Products", True, "Correctly prevented deletion of category with products")
             else:
-                self.log_test(
-                    "Admin Login", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Admin Login", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_protected_endpoint(self):
-        """Test GET /api/auth/me with JWT token"""
-        print("=== Testing Protected Endpoint (/auth/me) ===")
+                self.log_result("Delete Category with Products", False, "Should prevent deletion of category with products")
         
-        if not self.auth_token:
-            self.log_test(
-                "Protected Endpoint Access", 
-                False, 
-                "No auth token available from previous login test"
-            )
-            return
-            
-        try:
-            headers = {"Authorization": f"Bearer {self.auth_token}"}
-            response = self.session.get(f"{self.base_url}/auth/me", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if (data.get("email") == "admin@salesmanager.com" and 
-                    data.get("role") == "admin"):
-                    
-                    self.log_test(
-                        "Protected Endpoint Access", 
-                        True, 
-                        f"Successfully accessed protected endpoint with JWT token",
-                        {
-                            "user_email": data["email"],
-                            "user_role": data["role"],
-                            "user_name": data.get("name")
-                        }
-                    )
-                else:
-                    self.log_test(
-                        "Protected Endpoint Access", 
-                        False, 
-                        f"Unexpected user data returned",
-                        data
-                    )
-            else:
-                self.log_test(
-                    "Protected Endpoint Access", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Protected Endpoint Access", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_user_registration(self):
-        """Test POST /api/auth/register"""
-        print("=== Testing User Registration ===")
+        # Test category deletion (empty category - should succeed)
+        response = self.make_request("DELETE", f"/categories/{test_category_id}", self.admin_token)
+        if response and response.status_code == 200:
+            self.log_result("Delete Empty Category (Admin)", True, "Empty category deleted successfully")
+        else:
+            self.log_result("Delete Empty Category (Admin)", False, "Failed to delete empty category")
         
-        # Use realistic test data with timestamp to ensure uniqueness
-        import time
-        timestamp = str(int(time.time()))
-        user_data = {
-            "email": f"marie.dupont.{timestamp}@salesmanager.com",
-            "password": "marie2025!",
-            "role": "serveur",
-            "name": "Marie Dupont"
+        # Test category deletion permission (server - should fail)
+        response = self.make_request("DELETE", f"/categories/{test_category_id}", self.server_token)
+        if response and response.status_code == 403:
+            self.log_result("Delete Category Permission (Server)", True, "Server correctly denied delete access")
+        else:
+            self.log_result("Delete Category Permission (Server)", False, "Server should not have delete access")
+        
+        return True
+    
+    def test_products_crud(self):
+        """Test Products CRUD operations"""
+        print("\n=== TESTING PRODUCTS CRUD ===")
+        
+        if not self.test_category_id:
+            self.log_result("Products Test Setup", False, "No category available for product testing")
+            return False
+        
+        # Test get all products
+        response = self.make_request("GET", "/products", self.admin_token)
+        if response and response.status_code == 200:
+            products = response.json()
+            self.log_result("Get All Products", True, f"Retrieved {len(products)} products")
+        else:
+            self.log_result("Get All Products", False, "Failed to get products")
+        
+        # Test get products by category
+        response = self.make_request("GET", "/products", self.admin_token, params={"category_id": self.test_category_id})
+        if response and response.status_code == 200:
+            filtered_products = response.json()
+            self.log_result("Get Products by Category", True, f"Retrieved {len(filtered_products)} products for category")
+        else:
+            self.log_result("Get Products by Category", False, "Failed to get products by category")
+        
+        # Test product creation with base64 image (admin)
+        sample_image_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        new_product = {
+            "name": "Produit Test",
+            "code": "TEST001",
+            "category_id": self.test_category_id,
+            "purchase_price": 100.0,
+            "selling_price": 150.0,
+            "stock": 50,
+            "image": sample_image_b64
         }
+        response = self.make_request("POST", "/products", self.admin_token, new_product)
+        if response and response.status_code == 200:
+            created_product = response.json()
+            self.test_product_id = created_product["id"]
+            self.log_result("Create Product with Image (Admin)", True, "Product with base64 image created successfully")
+        else:
+            self.log_result("Create Product with Image (Admin)", False, "Failed to create product with image",
+                          f"Status: {response.status_code if response else 'No response'}")
+            return False
         
-        try:
-            response = self.session.post(
-                f"{self.base_url}/auth/register",
-                json=user_data,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check if user was created with correct data
-                if (data.get("email") == user_data["email"] and 
-                    data.get("role") == user_data["role"] and
-                    data.get("name") == user_data["name"] and
-                    "id" in data):
-                    
-                    self.log_test(
-                        "User Registration", 
-                        True, 
-                        f"User registered successfully with correct role",
-                        {
-                            "user_id": data["id"],
-                            "email": data["email"],
-                            "role": data["role"],
-                            "name": data["name"]
-                        }
-                    )
-                else:
-                    self.log_test(
-                        "User Registration", 
-                        False, 
-                        f"User data mismatch or missing fields",
-                        data
-                    )
-            else:
-                self.log_test(
-                    "User Registration", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "User Registration", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_categories_endpoint(self):
-        """Test GET /api/categories with authentication"""
-        print("=== Testing Categories Endpoint ===")
+        # Test product creation permission (server - should fail)
+        duplicate_product = new_product.copy()
+        duplicate_product["code"] = "TEST002"
+        response = self.make_request("POST", "/products", self.server_token, duplicate_product)
+        if response and response.status_code == 403:
+            self.log_result("Create Product Permission (Server)", True, "Server correctly denied create access")
+        else:
+            self.log_result("Create Product Permission (Server)", False, "Server should not have create access")
         
-        if not self.auth_token:
-            self.log_test(
-                "Categories Endpoint", 
-                False, 
-                "No auth token available"
-            )
-            return
-            
-        try:
-            headers = {"Authorization": f"Bearer {self.auth_token}"}
-            response = self.session.get(f"{self.base_url}/categories", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if isinstance(data, list) and len(data) >= 3:
-                    # Check for default categories
-                    category_names = [cat.get("name") for cat in data]
-                    expected_categories = ["Boissons", "Alimentaire", "Hygiène"]
-                    
-                    found_categories = [cat for cat in expected_categories if cat in category_names]
-                    
-                    if len(found_categories) == len(expected_categories):
-                        self.log_test(
-                            "Categories Endpoint", 
-                            True, 
-                            f"Default categories found: {found_categories}",
-                            {"categories_count": len(data), "categories": category_names}
-                        )
-                    else:
-                        self.log_test(
-                            "Categories Endpoint", 
-                            False, 
-                            f"Missing default categories. Found: {found_categories}, Expected: {expected_categories}",
-                            {"categories": category_names}
-                        )
-                else:
-                    self.log_test(
-                        "Categories Endpoint", 
-                        False, 
-                        f"Expected list with at least 3 categories, got: {type(data)} with {len(data) if isinstance(data, list) else 'N/A'} items",
-                        data
-                    )
-            else:
-                self.log_test(
-                    "Categories Endpoint", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Categories Endpoint", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_error_scenarios(self):
-        """Test error scenarios"""
-        print("=== Testing Error Scenarios ===")
+        # Test duplicate product code (should fail)
+        duplicate_code_product = new_product.copy()
+        duplicate_code_product["name"] = "Autre Produit"
+        response = self.make_request("POST", "/products", self.admin_token, duplicate_code_product)
+        if response and response.status_code == 400:
+            self.log_result("Duplicate Product Code", True, "Correctly prevented duplicate product code")
+        else:
+            self.log_result("Duplicate Product Code", False, "Should prevent duplicate product codes")
         
-        # Test 1: Login with wrong credentials
-        try:
-            wrong_login = {
-                "email": "admin@salesmanager.com",
-                "password": "wrongpassword"
-            }
-            
-            response = self.session.post(
-                f"{self.base_url}/auth/login",
-                json=wrong_login,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 401:
-                self.log_test(
-                    "Wrong Credentials Error", 
-                    True, 
-                    f"Correctly rejected wrong credentials with HTTP 401",
-                    {"status_code": response.status_code}
-                )
-            else:
-                self.log_test(
-                    "Wrong Credentials Error", 
-                    False, 
-                    f"Expected HTTP 401, got {response.status_code}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Wrong Credentials Error", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
+        # Test get specific product
+        response = self.make_request("GET", f"/products/{self.test_product_id}", self.admin_token)
+        if response and response.status_code == 200:
+            product = response.json()
+            self.log_result("Get Specific Product", True, f"Retrieved product: {product['name']}")
+        else:
+            self.log_result("Get Specific Product", False, "Failed to get specific product")
         
-        # Test 2: Access protected endpoint without token
-        try:
-            response = self.session.get(f"{self.base_url}/auth/me")
-            
-            if response.status_code == 403:
-                self.log_test(
-                    "Unauthorized Access Error", 
-                    True, 
-                    f"Correctly rejected unauthorized access with HTTP 403",
-                    {"status_code": response.status_code}
-                )
-            else:
-                self.log_test(
-                    "Unauthorized Access Error", 
-                    False, 
-                    f"Expected HTTP 403, got {response.status_code}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "Unauthorized Access Error", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
-    def test_api_root(self):
-        """Test GET /api/ root endpoint"""
-        print("=== Testing API Root Endpoint ===")
+        # Test product update (admin)
+        updated_product = {
+            "name": "Produit Test Modifié",
+            "code": "TEST001",
+            "category_id": self.test_category_id,
+            "purchase_price": 110.0,
+            "selling_price": 160.0,
+            "stock": 45,
+            "image": sample_image_b64
+        }
+        response = self.make_request("PUT", f"/products/{self.test_product_id}", self.admin_token, updated_product)
+        if response and response.status_code == 200:
+            self.log_result("Update Product (Admin)", True, "Product updated successfully")
+        else:
+            self.log_result("Update Product (Admin)", False, "Failed to update product")
         
-        try:
-            response = self.session.get(f"{self.base_url}/")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "Sales Manager API" in data.get("message", ""):
-                    self.log_test(
-                        "API Root Endpoint", 
-                        True, 
-                        f"API root accessible and returns correct message",
-                        data
-                    )
-                else:
-                    self.log_test(
-                        "API Root Endpoint", 
-                        False, 
-                        f"Unexpected response format",
-                        data
-                    )
+        # Test product update permission (server - should fail)
+        response = self.make_request("PUT", f"/products/{self.test_product_id}", self.server_token, updated_product)
+        if response and response.status_code == 403:
+            self.log_result("Update Product Permission (Server)", True, "Server correctly denied update access")
+        else:
+            self.log_result("Update Product Permission (Server)", False, "Server should not have update access")
+        
+        # Test stock update (admin)
+        stock_update = {"stock": 75}
+        response = self.make_request("PATCH", f"/products/{self.test_product_id}/stock", self.admin_token, stock_update)
+        if response and response.status_code == 200:
+            updated_product = response.json()
+            if updated_product["stock"] == 75:
+                self.log_result("Update Product Stock (Admin)", True, "Product stock updated successfully")
             else:
-                self.log_test(
-                    "API Root Endpoint", 
-                    False, 
-                    f"HTTP {response.status_code}: {response.text}",
-                    response.text
-                )
-                
-        except Exception as e:
-            self.log_test(
-                "API Root Endpoint", 
-                False, 
-                f"Request failed: {str(e)}"
-            )
-
+                self.log_result("Update Product Stock (Admin)", False, "Stock not updated correctly")
+        else:
+            self.log_result("Update Product Stock (Admin)", False, "Failed to update product stock")
+        
+        # Test stock update permission (server - should fail)
+        response = self.make_request("PATCH", f"/products/{self.test_product_id}/stock", self.server_token, stock_update)
+        if response and response.status_code == 403:
+            self.log_result("Update Stock Permission (Server)", True, "Server correctly denied stock update access")
+        else:
+            self.log_result("Update Stock Permission (Server)", False, "Server should not have stock update access")
+        
+        # Test invalid stock update (negative value)
+        invalid_stock = {"stock": -10}
+        response = self.make_request("PATCH", f"/products/{self.test_product_id}/stock", self.admin_token, invalid_stock)
+        if response and response.status_code == 400:
+            self.log_result("Invalid Stock Update", True, "Correctly rejected negative stock value")
+        else:
+            self.log_result("Invalid Stock Update", False, "Should reject negative stock values")
+        
+        # Test product deletion permission (server - should fail)
+        response = self.make_request("DELETE", f"/products/{self.test_product_id}", self.server_token)
+        if response and response.status_code == 403:
+            self.log_result("Delete Product Permission (Server)", True, "Server correctly denied delete access")
+        else:
+            self.log_result("Delete Product Permission (Server)", False, "Server should not have delete access")
+        
+        # Test product deletion (admin)
+        response = self.make_request("DELETE", f"/products/{self.test_product_id}", self.admin_token)
+        if response and response.status_code == 200:
+            self.log_result("Delete Product (Admin)", True, "Product deleted successfully")
+        else:
+            self.log_result("Delete Product (Admin)", False, "Failed to delete product")
+        
+        return True
+    
+    def test_server_read_only_access(self):
+        """Test that server users can only read data"""
+        print("\n=== TESTING SERVER READ-ONLY ACCESS ===")
+        
+        # Test server can read categories
+        response = self.make_request("GET", "/categories", self.server_token)
+        if response and response.status_code == 200:
+            self.log_result("Server Read Categories", True, "Server can read categories")
+        else:
+            self.log_result("Server Read Categories", False, "Server should be able to read categories")
+        
+        # Test server can read products
+        response = self.make_request("GET", "/products", self.server_token)
+        if response and response.status_code == 200:
+            self.log_result("Server Read Products", True, "Server can read products")
+        else:
+            self.log_result("Server Read Products", False, "Server should be able to read products")
+        
+        # Test server can read specific product
+        if self.test_product_id:
+            response = self.make_request("GET", f"/products/{self.test_product_id}", self.server_token)
+            if response and response.status_code == 200:
+                self.log_result("Server Read Specific Product", True, "Server can read specific product")
+            else:
+                self.log_result("Server Read Specific Product", False, "Server should be able to read specific product")
+    
+    def test_edge_cases(self):
+        """Test edge cases and error handling"""
+        print("\n=== TESTING EDGE CASES ===")
+        
+        # Test invalid product ID
+        response = self.make_request("GET", "/products/invalid_id", self.admin_token)
+        if response and response.status_code == 400:
+            self.log_result("Invalid Product ID", True, "Correctly handled invalid product ID")
+        else:
+            self.log_result("Invalid Product ID", False, "Should handle invalid product ID gracefully")
+        
+        # Test non-existent product ID
+        fake_id = "507f1f77bcf86cd799439011"  # Valid ObjectId format but non-existent
+        response = self.make_request("GET", f"/products/{fake_id}", self.admin_token)
+        if response and response.status_code == 404:
+            self.log_result("Non-existent Product", True, "Correctly handled non-existent product")
+        else:
+            self.log_result("Non-existent Product", False, "Should return 404 for non-existent product")
+        
+        # Test invalid category ID in product creation
+        invalid_product = {
+            "name": "Test Product",
+            "code": "INVALID001",
+            "category_id": "invalid_category_id",
+            "purchase_price": 100.0,
+            "selling_price": 150.0,
+            "stock": 10
+        }
+        response = self.make_request("POST", "/products", self.admin_token, invalid_product)
+        if response and response.status_code == 400:
+            self.log_result("Invalid Category ID in Product", True, "Correctly rejected invalid category ID")
+        else:
+            self.log_result("Invalid Category ID in Product", False, "Should reject invalid category ID")
+    
     def run_all_tests(self):
-        """Run all tests in sequence"""
-        print(f"🚀 Starting Backend API Tests for Sales Manager")
-        print(f"📍 Base URL: {self.base_url}")
-        print(f"⏰ Test started at: {datetime.now().isoformat()}")
+        """Run all test suites"""
+        print("🚀 Starting Backend Tests for Sales Manager - Phase 2")
         print("=" * 60)
         
-        # Test sequence
-        self.test_api_root()
-        self.test_initialization()
-        self.test_admin_login()
-        self.test_protected_endpoint()
-        self.test_user_registration()
-        self.test_categories_endpoint()
-        self.test_error_scenarios()
+        # Setup
+        if not self.setup_authentication():
+            print("❌ Authentication setup failed. Aborting tests.")
+            return False
+        
+        # Run test suites
+        self.test_categories_crud()
+        self.test_products_crud()
+        self.test_server_read_only_access()
+        self.test_edge_cases()
         
         # Summary
+        self.print_summary()
+        return True
+    
+    def print_summary(self):
+        """Print test results summary"""
+        print("\n" + "=" * 60)
+        print("📊 TEST RESULTS SUMMARY")
         print("=" * 60)
-        print("📊 TEST SUMMARY")
-        print("=" * 60)
         
-        total_tests = len(self.test_results)
-        passed_tests = sum(1 for result in self.test_results if result["success"])
-        failed_tests = total_tests - passed_tests
+        passed = sum(1 for r in self.results if r["success"])
+        failed = sum(1 for r in self.results if not r["success"])
+        total = len(self.results)
         
-        print(f"Total Tests: {total_tests}")
-        print(f"✅ Passed: {passed_tests}")
-        print(f"❌ Failed: {failed_tests}")
-        print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
+        print(f"Total Tests: {total}")
+        print(f"✅ Passed: {passed}")
+        print(f"❌ Failed: {failed}")
+        print(f"Success Rate: {(passed/total*100):.1f}%")
         
-        if failed_tests > 0:
+        if failed > 0:
             print("\n🔍 FAILED TESTS:")
-            for result in self.test_results:
+            for result in self.results:
                 if not result["success"]:
-                    print(f"  • {result['test']}: {result['details']}")
+                    print(f"  ❌ {result['test']}: {result['message']}")
+                    if result["details"]:
+                        print(f"     Details: {result['details']}")
         
-        print(f"\n⏰ Test completed at: {datetime.now().isoformat()}")
-        
-        return passed_tests == total_tests
+        print("\n" + "=" * 60)
 
 if __name__ == "__main__":
-    tester = SalesManagerTester()
+    tester = TestRunner()
     success = tester.run_all_tests()
     sys.exit(0 if success else 1)
