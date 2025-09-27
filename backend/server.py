@@ -550,6 +550,8 @@ async def delete_category(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid category ID")
         raise HTTPException(status_code=400, detail="Invalid category ID")
 
 # ================================
