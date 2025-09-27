@@ -164,6 +164,7 @@ class TestRunner:
             self.log_result("Update Category (Admin)", False, "Failed to update category")
         
         # Test category update permission (server - should fail)
+        time.sleep(0.5)  # Small delay to avoid race conditions
         response = self.make_request("PUT", f"/categories/{test_category_id}", self.server_token, updated_category)
         if response:
             print(f"DEBUG: Server category update response: {response.status_code}")
