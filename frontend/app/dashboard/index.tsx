@@ -187,6 +187,28 @@ export default function DashboardScreen() {
               <Ionicons name="chevron-forward" size={20} color="#666" />
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/reports')}
+          >
+            <View style={styles.menuItemContent}>
+              <Ionicons name="bar-chart-outline" size={24} color="#e83e8c" />
+              <Text style={styles.menuItemText}>Rapports & Statistiques</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/sync')}
+          >
+            <View style={styles.menuItemContent}>
+              <Ionicons name="sync-outline" size={24} color="#20c997" />
+              <Text style={styles.menuItemText}>Synchronisation</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
