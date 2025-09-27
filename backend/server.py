@@ -354,6 +354,115 @@ async def get_current_user_info(current_user: UserResponse = Depends(get_current
     return current_user
 
 # ================================
+# Role Management Routes (Admin Only)
+# ================================
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+@api_router.get("/users", response_model=List[UserResponse])
+async def get_all_users(current_user: UserResponse = Depends(get_current_user)):
+    """Get all users (Admin only)"""
+    require_admin(current_user)
+    
+    users = await db.users.find({"is_active": True}).to_list(1000)
+    for user in users:
+        user["id"] = str(user["_id"])
+        del user["_id"]
+        del user["password"]
+    
+    return [UserResponse(**user) for user in users]
+
+@api_router.patch("/users/{user_id}/role", response_model=UserResponse)
+async def update_user_role(
+    user_id: str,
+    role_data: UserRoleUpdate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Update user role (Admin only)"""
+    require_admin(current_user)
+    
+    # Validate role
+    if role_data.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.SERVER]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role. Must be admin, gérant, or serveur"
+        )
+    
+    # Check if user exists
+    try:
+        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+    
+    # Prevent admin from changing their own role
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own role"
+        )
+    
+    # Update role
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": role_data.role}}
+    )
+    
+    # Return updated user
+    updated_user = await db.users.find_one({"_id": ObjectId(user_id)})
+    updated_user["id"] = str(updated_user["_id"])
+    del updated_user["_id"]
+    del updated_user["password"]
+    
+    return UserResponse(**updated_user)
+
+@api_router.delete("/users/{user_id}")
+async def deactivate_user(
+    user_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Deactivate user (Admin only)"""
+    require_admin(current_user)
+    
+    # Check if user exists
+    try:
+        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+    
+    # Prevent admin from deactivating themselves
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot deactivate your own account"
+        )
+    
+    # Deactivate user
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"is_active": False}}
+    )
+    
+    return {"message": "User deactivated successfully"}
+
+@api_router.get("/roles")
+async def get_available_roles(current_user: UserResponse = Depends(get_current_user)):
+    """Get list of available roles"""
+    require_any_role(current_user)
+    
+    return {
+        "roles": [
+            {"value": UserRole.ADMIN, "label": "Administrateur", "description": "Accès complet à toutes les fonctionnalités"},
+            {"value": UserRole.MANAGER, "label": "Gérant", "description": "Accès aux ventes et achats"},
+            {"value": UserRole.SERVER, "label": "Serveur", "description": "Accès aux ventes uniquement"}
+        ]
+    }
+
+# ================================
 # Categories Routes
 # ================================
 
