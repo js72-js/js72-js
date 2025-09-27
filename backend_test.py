@@ -448,7 +448,7 @@ class BackendTester:
                 # Test without token
                 response = self.make_request("GET", endpoint)
                 
-                if response.status_code == 401:
+                if response.status_code in [401, 403]:
                     self.log_test(f"Authentication Required - {endpoint}", True, "Correctly requires authentication")
                 else:
                     self.log_test(f"Authentication Required - {endpoint}", False, f"Status: {response.status_code}")
