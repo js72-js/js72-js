@@ -61,10 +61,10 @@ class OfflineStorageService {
 
   constructor() {
     this.initializeNetworkListener();
-    this.generateDeviceId();
+    this.initializeDeviceId();
   }
 
-  private async generateDeviceId() {
+  private async initializeDeviceId() {
     try {
       let deviceId = await AsyncStorage.getItem(DEVICE_ID_KEY);
       if (!deviceId) {
@@ -74,6 +74,8 @@ class OfflineStorageService {
       this.deviceId = deviceId;
     } catch (error) {
       console.error('Error generating device ID:', error);
+      // Fallback device ID if AsyncStorage fails
+      this.deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
   }
 
