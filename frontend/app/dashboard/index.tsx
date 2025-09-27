@@ -102,9 +102,13 @@ export default function DashboardScreen() {
           <Text style={styles.welcomeText}>
             Bonjour, {user?.name || 'Utilisateur'}
           </Text>
-          <Text style={styles.roleText}>
-            Rôle: {user?.role || 'Non défini'}
-          </Text>
+          <View style={styles.roleContainer}>
+            <View style={[styles.roleBadge, { backgroundColor: getRoleColor(user?.role || '') }]}>
+              <Text style={styles.roleText}>
+                {getRoleDisplayName(user?.role || '')}
+              </Text>
+            </View>
+          </View>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color="#fff" />
             <Text style={styles.logoutText}>Déconnexion</Text>
