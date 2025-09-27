@@ -348,9 +348,12 @@ class BackendTester:
                 categories = response.json()
                 if categories:
                     category_id = categories[0]["id"]
+                    # Create unique product codes for each role test
+                    import random
+                    unique_code = f"TEST{int(time.time())}{random.randint(100, 999)}"
                     self.test_endpoint_permissions("/products", "POST", {
                         "admin": True, "manager": True, "server": False
-                    }, data={"name": "Test Product", "code": f"TEST{int(time.time())}", "category_id": category_id, 
+                    }, data={"name": "Test Product", "code": unique_code, "category_id": category_id, 
                             "purchase_price": 10.0, "selling_price": 15.0, "stock": 100})
                 else:
                     self.log_test("POST /products - No Categories Available", False, "No categories found for product creation")
