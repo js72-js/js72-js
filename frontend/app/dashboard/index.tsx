@@ -255,10 +255,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 4,
   },
-  roleText: {
-    fontSize: 16,
-    color: '#e3f2fd',
+  roleContainer: {
     marginBottom: 16,
+  },
+  roleBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+  },
+  roleText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: 'bold',
   },
   logoutButton: {
     flexDirection: 'row',
