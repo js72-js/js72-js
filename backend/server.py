@@ -925,6 +925,322 @@ async def update_sale_total(sale_id: str):
         return 0.0
 
 # ================================
+# Payment Methods Routes
+# ================================
+
+@api_router.get("/payment-methods", response_model=List[PaymentMethod])
+async def get_payment_methods(current_user: UserResponse = Depends(get_current_user)):
+    """Get all active payment methods"""
+    payment_methods = await db.payment_methods.find({"is_active": True}).to_list(100)
+    for method in payment_methods:
+        method["id"] = str(method["_id"])
+        del method["_id"]
+    return [PaymentMethod(**method) for method in payment_methods]
+
+# ================================
+# Payment and Finalization Routes
+# ================================
+
+class PaymentData(BaseModel):
+    payment_method_id: str
+    amount: float
+
+class CompletePaymentData(BaseModel):
+    payments: List[PaymentData]
+    seller_name: str
+
+class DebtData(BaseModel):
+    debtor_name: str
+    seller_name: str
+    amount: float
+
+@api_router.post("/sales/{sale_id}/complete")
+async def complete_sale(
+    sale_id: str,
+    payment_data: CompletePaymentData,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Complete sale with payments and update stock"""
+    try:
+        # Get sale details
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        if sale["status"] == "completed":
+            raise HTTPException(status_code=400, detail="Sale already completed")
+        
+        # Calculate total payments
+        total_payments = sum(payment.amount for payment in payment_data.payments)
+        sale_total = sale["total_amount"]
+        
+        if total_payments > sale_total:
+            raise HTTPException(status_code=400, detail="Payment exceeds sale total")
+        
+        # Process payments
+        for payment in payment_data.payments:
+            if payment.amount <= 0:
+                continue
+            
+            # Verify payment method exists
+            payment_method = await db.payment_methods.find_one({"_id": ObjectId(payment.payment_method_id)})
+            if not payment_method:
+                raise HTTPException(status_code=400, detail="Invalid payment method")
+            
+            # Create payment record
+            payment_record = Payment(
+                sale_id=sale_id,
+                payment_method_id=payment.payment_method_id,
+                amount=payment.amount
+            )
+            
+            payment_dict = payment_record.dict()
+            payment_dict["_id"] = ObjectId(payment_dict["id"])
+            del payment_dict["id"]
+            
+            await db.payments.insert_one(payment_dict)
+        
+        # Handle remaining amount (debt)
+        debt_amount = sale_total - total_payments
+        debt_id = None
+        
+        if debt_amount > 0:
+            # This will be handled by separate debt creation endpoint
+            # For now, we'll mark as partial payment
+            payment_status = "partial"
+        else:
+            payment_status = "paid"
+        
+        # Update stock for all items in the sale
+        sale_items = await db.sale_items.find({"sale_id": sale_id}).to_list(100)
+        
+        for item in sale_items:
+            # Reduce product stock
+            await db.products.update_one(
+                {"_id": ObjectId(item["product_id"])},
+                {"$inc": {"stock": -item["quantity"]}}
+            )
+        
+        # Mark sale as completed
+        await db.sales.update_one(
+            {"_id": ObjectId(sale_id)},
+            {"$set": {
+                "status": "completed",
+                "payment_status": payment_status,
+                "completed_at": datetime.utcnow()
+            }}
+        )
+        
+        # Create sales summary record
+        await create_sales_summary(sale_id, payment_data.seller_name)
+        
+        return {
+            "message": "Sale completed successfully",
+            "sale_id": sale_id,
+            "total_amount": sale_total,
+            "paid_amount": total_payments,
+            "debt_amount": debt_amount,
+            "payment_status": payment_status
+        }
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid ID")
+        raise HTTPException(status_code=400, detail=f"Error completing sale: {str(e)}")
+
+@api_router.post("/sales/{sale_id}/debt")
+async def create_debt(
+    sale_id: str,
+    debt_data: DebtData,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Create debt record for partial payment"""
+    try:
+        # Verify sale exists
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
+        
+        # Create debt record
+        debt = Debt(
+            sale_id=sale_id,
+            debtor_name=debt_data.debtor_name,
+            seller_name=debt_data.seller_name,
+            amount=debt_data.amount
+        )
+        
+        debt_dict = debt.dict()
+        debt_dict["_id"] = ObjectId(debt_dict["id"])
+        del debt_dict["id"]
+        
+        result = await db.debts.insert_one(debt_dict)
+        debt_dict["id"] = str(result.inserted_id)
+        del debt_dict["_id"]
+        
+        return Debt(**debt_dict)
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid sale ID")
+        raise HTTPException(status_code=400, detail="Error creating debt")
+
+async def create_sales_summary(sale_id: str, seller_name: str):
+    """Create sales summary record"""
+    try:
+        # Get sale details
+        sale = await db.sales.find_one({"_id": ObjectId(sale_id)})
+        if not sale:
+            return
+        
+        # Get payment methods used
+        payments = await db.payments.find({"sale_id": sale_id}).to_list(100)
+        
+        payment_methods = []
+        for payment in payments:
+            method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
+            if method:
+                payment_methods.append({
+                    "method_name": method["name"],
+                    "amount": payment["amount"]
+                })
+        
+        # Create summary record
+        summary = {
+            "_id": ObjectId(),
+            "sale_number": sale["sale_number"],
+            "sale_id": sale_id,
+            "total_amount": sale["total_amount"],
+            "payment_methods": payment_methods,
+            "sale_date": sale["completed_at"] or datetime.utcnow(),
+            "seller_name": seller_name,
+            "created_at": datetime.utcnow()
+        }
+        
+        await db.sales_summaries.insert_one(summary)
+        
+    except Exception as e:
+        print(f"Error creating sales summary: {e}")
+
+# ================================
+# Sales History and Reports
+# ================================
+
+@api_router.get("/sales/history")
+async def get_sales_history(
+    current_user: UserResponse = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
+    """Get sales history with pagination"""
+    try:
+        # Get completed sales with pagination
+        sales = await db.sales.find(
+            {"status": "completed"}
+        ).sort("completed_at", -1).skip(offset).limit(limit).to_list(limit)
+        
+        result = []
+        for sale in sales:
+            # Get sale items count
+            items_count = await db.sale_items.count_documents({"sale_id": str(sale["_id"])})
+            
+            # Get payments
+            payments = await db.payments.find({"sale_id": str(sale["_id"])}).to_list(100)
+            payment_methods = []
+            
+            for payment in payments:
+                method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
+                if method:
+                    payment_methods.append({
+                        "method_name": method["name"],
+                        "amount": payment["amount"]
+                    })
+            
+            sale_data = {
+                "id": str(sale["_id"]),
+                "sale_number": sale["sale_number"],
+                "total_amount": sale["total_amount"],
+                "payment_status": sale.get("payment_status", "paid"),
+                "completed_at": sale.get("completed_at"),
+                "created_at": sale["created_at"],
+                "items_count": items_count,
+                "payment_methods": payment_methods
+            }
+            result.append(sale_data)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching sales history: {str(e)}")
+
+@api_router.get("/debts")
+async def get_debts(
+    current_user: UserResponse = Depends(get_current_user),
+    is_settled: Optional[bool] = None
+):
+    """Get debt records"""
+    try:
+        query = {}
+        if is_settled is not None:
+            query["is_settled"] = is_settled
+        
+        debts = await db.debts.find(query).sort("date", -1).to_list(100)
+        
+        result = []
+        for debt in debts:
+            debt_data = {
+                "id": str(debt["_id"]),
+                "sale_id": debt["sale_id"],
+                "debtor_name": debt["debtor_name"],
+                "seller_name": debt["seller_name"],
+                "amount": debt["amount"],
+                "date": debt["date"],
+                "is_settled": debt["is_settled"]
+            }
+            
+            # Get sale number if available
+            try:
+                sale = await db.sales.find_one({"_id": ObjectId(debt["sale_id"])})
+                if sale:
+                    debt_data["sale_number"] = sale["sale_number"]
+            except:
+                pass
+            
+            result.append(debt_data)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching debts: {str(e)}")
+
+@api_router.patch("/debts/{debt_id}/settle")
+async def settle_debt(
+    debt_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Mark debt as settled"""
+    try:
+        result = await db.debts.update_one(
+            {"_id": ObjectId(debt_id)},
+            {"$set": {"is_settled": True}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Debt not found")
+        
+        return {"message": "Debt marked as settled"}
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid debt ID")
+        raise HTTPException(status_code=400, detail="Error settling debt")
+
+# ================================
 # Initial Setup Routes
 # ================================
 
