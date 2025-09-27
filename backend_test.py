@@ -164,10 +164,14 @@ class TestRunner:
         
         # Test category update permission (server - should fail)
         response = self.make_request("PUT", f"/categories/{test_category_id}", self.server_token, updated_category)
-        if response and response.status_code == 403:
-            self.log_result("Update Category Permission (Server)", True, "Server correctly denied access")
+        if response:
+            print(f"DEBUG: Server category update response: {response.status_code}")
+            if response.status_code == 403:
+                self.log_result("Update Category Permission (Server)", True, "Server correctly denied access")
+            else:
+                self.log_result("Update Category Permission (Server)", False, f"Expected 403, got {response.status_code}")
         else:
-            self.log_result("Update Category Permission (Server)", False, "Server should not have update access")
+            self.log_result("Update Category Permission (Server)", False, "No response received")
         
         # Test category deletion with products (should fail)
         if self.test_category_id:
