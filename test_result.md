@@ -193,6 +193,17 @@ frontend:
       - working: false
         agent: "main"
         comment: "Phase 3 Frontend implémentée: Sélection produits avec génération numéro vente, ajout au panier avec vérification stock, gestion quantités (+-), calculs totaux automatiques, mise en attente, liste ventes en attente, interface panier complète. Design mobile-first React Native. Prêt pour tests."
+  - task: "Paiement et Finalisation - Frontend"
+    implemented: true
+    working: false
+    file: "app/sales/payment.tsx, app/sales/history.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Phase 4 Frontend implémentée: Interface paiement multi-modes avec validation montants, gestion dettes automatique (prompt nom débiteur), finalisation vente, historique complet avec détails paiements et statuts. Design mobile-first avec KeyboardAvoidingView. Prêt pour tests."
 
 metadata:
   created_by: "main_agent"
