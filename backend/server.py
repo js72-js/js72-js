@@ -2133,6 +2133,439 @@ async def get_stock_status(current_user: UserResponse = Depends(get_current_user
         raise HTTPException(status_code=400, detail=f"Error generating stock status report: {str(e)}")
 
 # ================================
+# Synchronization Routes
+# ================================
+
+class SyncData(BaseModel):
+    sync_id: str
+    data_type: str  # 'sale', 'purchase', 'product', etc.
+    action: str  # 'create', 'update', 'delete'
+    data: dict
+    timestamp: datetime
+    device_id: Optional[str] = None
+
+class SyncBatch(BaseModel):
+    device_id: str
+    sync_items: List[SyncData]
+
+class SyncResponse(BaseModel):
+    sync_id: str
+    status: str  # 'success', 'conflict', 'error'
+    server_data: Optional[dict] = None
+    error_message: Optional[str] = None
+
+@api_router.post("/sync/upload")
+async def sync_upload_data(
+    sync_batch: SyncBatch,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Upload and sync data from offline device"""
+    try:
+        sync_results = []
+        
+        for sync_item in sync_batch.sync_items:
+            try:
+                result = await process_sync_item(sync_item, current_user)
+                sync_results.append(result)
+            except Exception as e:
+                sync_results.append(SyncResponse(
+                    sync_id=sync_item.sync_id,
+                    status="error",
+                    error_message=str(e)
+                ))
+        
+        # Store sync batch info
+        await store_sync_batch(sync_batch, current_user.id, sync_results)
+        
+        return {
+            "batch_id": sync_batch.device_id,
+            "processed_items": len(sync_results),
+            "results": sync_results
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Sync upload error: {str(e)}")
+
+async def process_sync_item(sync_item: SyncData, current_user: UserResponse) -> SyncResponse:
+    """Process individual sync item"""
+    try:
+        if sync_item.data_type == "sale" and sync_item.action == "create":
+            return await sync_sale_creation(sync_item, current_user)
+        elif sync_item.data_type == "product" and sync_item.action == "update":
+            return await sync_product_update(sync_item, current_user)
+        elif sync_item.data_type == "purchase" and sync_item.action == "create":
+            return await sync_purchase_creation(sync_item, current_user)
+        else:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="error",
+                error_message=f"Unsupported sync type: {sync_item.data_type}.{sync_item.action}"
+            )
+    except Exception as e:
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="error",
+            error_message=str(e)
+        )
+
+async def sync_sale_creation(sync_item: SyncData, current_user: UserResponse) -> SyncResponse:
+    """Sync sale creation from offline"""
+    try:
+        sale_data = sync_item.data
+        
+        # Check if sale already exists by sync_id or sale_number
+        existing_sale = await db.sales.find_one({
+            "$or": [
+                {"sync_id": sync_item.sync_id},
+                {"sale_number": sale_data.get("sale_number")}
+            ]
+        })
+        
+        if existing_sale:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="conflict",
+                server_data={"id": str(existing_sale["_id"]), "sale_number": existing_sale["sale_number"]},
+                error_message="Sale already exists"
+            )
+        
+        # Create sale
+        sale = Sale(
+            sale_number=sale_data["sale_number"],
+            user_id=current_user.id,
+            status=sale_data.get("status", "completed"),
+            total_amount=sale_data["total_amount"],
+            payment_status=sale_data.get("payment_status", "paid"),
+            created_at=datetime.fromisoformat(sale_data["created_at"]) if sale_data.get("created_at") else datetime.utcnow(),
+            completed_at=datetime.fromisoformat(sale_data["completed_at"]) if sale_data.get("completed_at") else datetime.utcnow()
+        )
+        
+        sale_dict = sale.dict()
+        sale_dict["_id"] = ObjectId(sale_dict["id"])
+        sale_dict["sync_id"] = sync_item.sync_id  # Store sync ID for tracking
+        del sale_dict["id"]
+        
+        result = await db.sales.insert_one(sale_dict)
+        sale_id = str(result.inserted_id)
+        
+        # Create sale items
+        if "items" in sale_data:
+            for item_data in sale_data["items"]:
+                sale_item = SaleItem(
+                    sale_id=sale_id,
+                    product_id=item_data["product_id"],
+                    quantity=item_data["quantity"],
+                    unit_price=item_data["unit_price"],
+                    total_price=item_data["total_price"]
+                )
+                
+                item_dict = sale_item.dict()
+                item_dict["_id"] = ObjectId(item_dict["id"])
+                del item_dict["id"]
+                
+                await db.sale_items.insert_one(item_dict)
+                
+                # Update product stock
+                await db.products.update_one(
+                    {"_id": ObjectId(item_data["product_id"])},
+                    {"$inc": {"stock": -item_data["quantity"]}}
+                )
+        
+        # Create payments
+        if "payments" in sale_data:
+            for payment_data in sale_data["payments"]:
+                payment = Payment(
+                    sale_id=sale_id,
+                    payment_method_id=payment_data["payment_method_id"],
+                    amount=payment_data["amount"],
+                    created_at=datetime.fromisoformat(payment_data["created_at"]) if payment_data.get("created_at") else datetime.utcnow()
+                )
+                
+                payment_dict = payment.dict()
+                payment_dict["_id"] = ObjectId(payment_dict["id"])
+                del payment_dict["id"]
+                
+                await db.payments.insert_one(payment_dict)
+        
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="success",
+            server_data={"id": sale_id, "sale_number": sale_data["sale_number"]}
+        )
+        
+    except Exception as e:
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="error",
+            error_message=f"Sale sync error: {str(e)}"
+        )
+
+async def sync_product_update(sync_item: SyncData, current_user: UserResponse) -> SyncResponse:
+    """Sync product update from offline"""
+    try:
+        product_data = sync_item.data
+        product_id = product_data.get("id")
+        
+        if not product_id:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="error",
+                error_message="Product ID required for update"
+            )
+        
+        # Check if product exists
+        existing_product = await db.products.find_one({"_id": ObjectId(product_id)})
+        if not existing_product:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="error",
+                error_message="Product not found"
+            )
+        
+        # Check for conflicts based on timestamp
+        server_updated = existing_product.get("updated_at", existing_product.get("created_at"))
+        client_updated = datetime.fromisoformat(product_data.get("updated_at"))
+        
+        if server_updated and server_updated > client_updated:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="conflict",
+                server_data={
+                    "id": str(existing_product["_id"]),
+                    "name": existing_product["name"],
+                    "updated_at": server_updated.isoformat()
+                },
+                error_message="Server version is newer"
+            )
+        
+        # Update product
+        update_data = {
+            "name": product_data["name"],
+            "selling_price": product_data["selling_price"],
+            "stock": product_data["stock"],
+            "updated_at": datetime.utcnow()
+        }
+        
+        await db.products.update_one(
+            {"_id": ObjectId(product_id)},
+            {"$set": update_data}
+        )
+        
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="success",
+            server_data={"id": product_id, "updated_at": update_data["updated_at"].isoformat()}
+        )
+        
+    except Exception as e:
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="error",
+            error_message=f"Product sync error: {str(e)}"
+        )
+
+async def sync_purchase_creation(sync_item: SyncData, current_user: UserResponse) -> SyncResponse:
+    """Sync purchase creation from offline"""
+    try:
+        purchase_data = sync_item.data
+        
+        # Check if purchase already exists
+        existing_purchase = await db.purchases.find_one({
+            "$or": [
+                {"sync_id": sync_item.sync_id},
+                {"purchase_number": purchase_data.get("purchase_number")}
+            ]
+        })
+        
+        if existing_purchase:
+            return SyncResponse(
+                sync_id=sync_item.sync_id,
+                status="conflict",
+                server_data={"id": str(existing_purchase["_id"]), "purchase_number": existing_purchase["purchase_number"]},
+                error_message="Purchase already exists"
+            )
+        
+        # Create purchase
+        purchase = Purchase(
+            purchase_number=purchase_data["purchase_number"],
+            supplier_id=purchase_data["supplier_id"],
+            invoice_number=purchase_data["invoice_number"],
+            purchase_date=datetime.fromisoformat(purchase_data["purchase_date"]) if purchase_data.get("purchase_date") else datetime.utcnow(),
+            total_amount=purchase_data["total_amount"],
+            user_id=current_user.id,
+            notes=purchase_data.get("notes"),
+            created_at=datetime.fromisoformat(purchase_data["created_at"]) if purchase_data.get("created_at") else datetime.utcnow()
+        )
+        
+        purchase_dict = purchase.dict()
+        purchase_dict["_id"] = ObjectId(purchase_dict["id"])
+        purchase_dict["sync_id"] = sync_item.sync_id
+        del purchase_dict["id"]
+        
+        result = await db.purchases.insert_one(purchase_dict)
+        purchase_id = str(result.inserted_id)
+        
+        # Create purchase items and update stock
+        if "items" in purchase_data:
+            for item_data in purchase_data["items"]:
+                purchase_item = PurchaseItem(
+                    purchase_id=purchase_id,
+                    product_id=item_data["product_id"],
+                    quantity=item_data["quantity"],
+                    unit_cost=item_data["unit_cost"],
+                    total_cost=item_data["total_cost"]
+                )
+                
+                item_dict = purchase_item.dict()
+                item_dict["_id"] = ObjectId(item_dict["id"])
+                del item_dict["id"]
+                
+                await db.purchase_items.insert_one(item_dict)
+                
+                # Update product stock
+                await db.products.update_one(
+                    {"_id": ObjectId(item_data["product_id"])},
+                    {"$inc": {"stock": item_data["quantity"]}}
+                )
+        
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="success",
+            server_data={"id": purchase_id, "purchase_number": purchase_data["purchase_number"]}
+        )
+        
+    except Exception as e:
+        return SyncResponse(
+            sync_id=sync_item.sync_id,
+            status="error",
+            error_message=f"Purchase sync error: {str(e)}"
+        )
+
+async def store_sync_batch(sync_batch: SyncBatch, user_id: str, results: List[SyncResponse]):
+    """Store sync batch information for audit"""
+    try:
+        sync_record = {
+            "_id": ObjectId(),
+            "device_id": sync_batch.device_id,
+            "user_id": user_id,
+            "sync_timestamp": datetime.utcnow(),
+            "items_count": len(sync_batch.sync_items),
+            "success_count": len([r for r in results if r.status == "success"]),
+            "conflict_count": len([r for r in results if r.status == "conflict"]),
+            "error_count": len([r for r in results if r.status == "error"]),
+            "results": [r.dict() for r in results]
+        }
+        
+        await db.sync_batches.insert_one(sync_record)
+    except Exception as e:
+        print(f"Error storing sync batch: {e}")
+
+@api_router.get("/sync/status/{device_id}")
+async def get_sync_status(
+    device_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get sync status for a device"""
+    try:
+        # Get latest sync batch for device
+        latest_sync = await db.sync_batches.find_one(
+            {"device_id": device_id, "user_id": current_user.id},
+            sort=[("sync_timestamp", -1)]
+        )
+        
+        if not latest_sync:
+            return {
+                "device_id": device_id,
+                "last_sync": None,
+                "status": "never_synced"
+            }
+        
+        return {
+            "device_id": device_id,
+            "last_sync": latest_sync["sync_timestamp"].isoformat(),
+            "items_count": latest_sync["items_count"],
+            "success_count": latest_sync["success_count"],
+            "conflict_count": latest_sync["conflict_count"],
+            "error_count": latest_sync["error_count"],
+            "status": "synced" if latest_sync["error_count"] == 0 and latest_sync["conflict_count"] == 0 else "needs_attention"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error getting sync status: {str(e)}")
+
+@api_router.get("/sync/download")
+async def sync_download_data(
+    current_user: UserResponse = Depends(get_current_user),
+    last_sync: Optional[str] = None,
+    data_types: Optional[str] = None
+):
+    """Download updated data for offline sync"""
+    try:
+        # Parse parameters
+        since_date = None
+        if last_sync:
+            try:
+                since_date = datetime.fromisoformat(last_sync.replace('Z', '+00:00'))
+            except:
+                since_date = datetime.fromisoformat(last_sync)
+        
+        types = data_types.split(',') if data_types else ['products', 'categories', 'payment_methods', 'suppliers']
+        
+        sync_data = {}
+        
+        # Get updated products
+        if 'products' in types:
+            query = {}
+            if since_date:
+                query["updated_at"] = {"$gt": since_date}
+            
+            products = await db.products.find(query).to_list(1000)
+            sync_data['products'] = []
+            
+            for product in products:
+                product["id"] = str(product["_id"])
+                del product["_id"]
+                sync_data['products'].append(product)
+        
+        # Get categories
+        if 'categories' in types:
+            categories = await db.categories.find().to_list(100)
+            sync_data['categories'] = []
+            
+            for category in categories:
+                category["id"] = str(category["_id"])
+                del category["_id"]
+                sync_data['categories'].append(category)
+        
+        # Get payment methods
+        if 'payment_methods' in types:
+            payment_methods = await db.payment_methods.find({"is_active": True}).to_list(100)
+            sync_data['payment_methods'] = []
+            
+            for pm in payment_methods:
+                pm["id"] = str(pm["_id"])
+                del pm["_id"]
+                sync_data['payment_methods'].append(pm)
+        
+        # Get suppliers (if user has permission)
+        if 'suppliers' in types and current_user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+            suppliers = await db.suppliers.find({"is_active": True}).to_list(100)
+            sync_data['suppliers'] = []
+            
+            for supplier in suppliers:
+                supplier["id"] = str(supplier["_id"])
+                del supplier["_id"]
+                sync_data['suppliers'].append(supplier)
+        
+        return {
+            "sync_timestamp": datetime.utcnow().isoformat(),
+            "data": sync_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Sync download error: {str(e)}")
+
+# ================================
 # Debt Management Routes
 # ================================
 
