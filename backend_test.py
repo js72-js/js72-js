@@ -84,9 +84,10 @@ class BackendTester:
     
     def create_test_users(self) -> bool:
         """Create test users with different roles"""
+        timestamp = int(time.time())
         test_users_data = [
-            {"email": "manager.test@salesmanager.com", "password": "manager123", "role": "gérant", "name": "Test Manager"},
-            {"email": "server.test@salesmanager.com", "password": "server123", "role": "serveur", "name": "Test Server"}
+            {"email": f"manager.test.{timestamp}@salesmanager.com", "password": "manager123", "role": "gérant", "name": "Test Manager"},
+            {"email": f"server.test.{timestamp}@salesmanager.com", "password": "server123", "role": "serveur", "name": "Test Server"}
         ]
         
         success_count = 0
