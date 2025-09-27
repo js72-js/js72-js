@@ -85,7 +85,8 @@ export default function SyncScreen() {
         return;
       }
 
-      const result = await OfflineStorageService.manualSync(BACKEND_URL, token);
+      const offlineStorage = OfflineStorageClass.getInstance();
+      const result = await offlineStorage.manualSync(BACKEND_URL, token);
       
       Alert.alert(
         result.uploadSuccess ? 'Synchronisation réussie' : 'Synchronisation partielle',
