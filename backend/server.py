@@ -1152,12 +1152,16 @@ async def get_sales_history(
             payment_methods = []
             
             for payment in payments:
-                method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
-                if method:
-                    payment_methods.append({
-                        "method_name": method["name"],
-                        "amount": payment["amount"]
-                    })
+                try:
+                    method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
+                    if method:
+                        payment_methods.append({
+                            "method_name": method["name"],
+                            "amount": payment["amount"]
+                        })
+                except Exception as e:
+                    print(f"Error processing payment method {payment.get('payment_method_id')}: {e}")
+                    continue
             
             sale_data = {
                 "id": str(sale["_id"]),
