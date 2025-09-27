@@ -118,7 +118,8 @@ export default function SyncScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await OfflineStorageService.clearAllOfflineData();
+              const offlineStorage = OfflineStorageClass.getInstance();
+              await offlineStorage.clearAllOfflineData();
               await loadSyncStatus();
               Alert.alert('Succès', 'Données hors ligne supprimées');
             } catch (error) {
