@@ -1232,6 +1232,492 @@ async def create_sales_summary(sale_id: str, seller_name: str):
         print(f"Error creating sales summary: {e}")
 
 # ================================
+# Suppliers Routes
+# ================================
+
+@api_router.get("/suppliers", response_model=List[Supplier])
+async def get_suppliers(current_user: UserResponse = Depends(get_current_user)):
+    """Get all active suppliers"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    suppliers = await db.suppliers.find({"is_active": True}).sort("name", 1).to_list(1000)
+    for supplier in suppliers:
+        supplier["id"] = str(supplier["_id"])
+        del supplier["_id"]
+    return [Supplier(**supplier) for supplier in suppliers]
+
+@api_router.post("/suppliers", response_model=Supplier)
+async def create_supplier(
+    supplier_data: SupplierCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Create new supplier"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    # Check if supplier name already exists
+    existing_supplier = await db.suppliers.find_one({"name": supplier_data.name})
+    if existing_supplier:
+        raise HTTPException(status_code=400, detail="Supplier name already exists")
+    
+    supplier = Supplier(**supplier_data.dict())
+    supplier_dict = supplier.dict()
+    supplier_dict["_id"] = ObjectId(supplier_dict["id"])
+    del supplier_dict["id"]
+    
+    result = await db.suppliers.insert_one(supplier_dict)
+    supplier_dict["id"] = str(result.inserted_id)
+    del supplier_dict["_id"]
+    
+    return Supplier(**supplier_dict)
+
+@api_router.put("/suppliers/{supplier_id}", response_model=Supplier)
+async def update_supplier(
+    supplier_id: str,
+    supplier_data: SupplierCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Update supplier"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Check if supplier name conflicts with another supplier
+        existing_supplier = await db.suppliers.find_one({
+            "name": supplier_data.name,
+            "_id": {"$ne": ObjectId(supplier_id)}
+        })
+        if existing_supplier:
+            raise HTTPException(status_code=400, detail="Supplier name already exists")
+        
+        result = await db.suppliers.update_one(
+            {"_id": ObjectId(supplier_id)},
+            {"$set": supplier_data.dict()}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Supplier not found")
+        
+        # Return updated supplier
+        updated_supplier = await db.suppliers.find_one({"_id": ObjectId(supplier_id)})
+        updated_supplier["id"] = str(updated_supplier["_id"])
+        del updated_supplier["_id"]
+        
+        return Supplier(**updated_supplier)
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid supplier ID")
+        raise HTTPException(status_code=400, detail="Error updating supplier")
+
+@api_router.delete("/suppliers/{supplier_id}")
+async def delete_supplier(
+    supplier_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Deactivate supplier"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        result = await db.suppliers.update_one(
+            {"_id": ObjectId(supplier_id)},
+            {"$set": {"is_active": False}}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Supplier not found")
+        
+        return {"message": "Supplier deactivated successfully"}
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid supplier ID")
+        raise HTTPException(status_code=400, detail="Error deleting supplier")
+
+# ================================
+# Purchase Routes
+# ================================
+
+@api_router.post("/purchases/generate-number")
+async def generate_purchase_number(current_user: UserResponse = Depends(get_current_user)):
+    """Generate unique purchase number"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    import time
+    timestamp = str(int(time.time() * 1000))[-8:]  # Last 8 digits of timestamp
+    purchase_number = f"ACH{timestamp}"
+    
+    # Ensure uniqueness
+    while await db.purchases.find_one({"purchase_number": purchase_number}):
+        time.sleep(0.001)
+        timestamp = str(int(time.time() * 1000))[-8:]
+        purchase_number = f"ACH{timestamp}"
+    
+    return {"purchase_number": purchase_number}
+
+@api_router.post("/purchases", response_model=Purchase)
+async def create_purchase(
+    purchase_data: PurchaseCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Create new purchase"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Verify supplier exists
+        supplier = await db.suppliers.find_one({"_id": ObjectId(purchase_data.supplier_id)})
+        if not supplier:
+            raise HTTPException(status_code=400, detail="Supplier not found")
+        
+        # Generate unique purchase number
+        number_response = await generate_purchase_number(current_user)
+        purchase_number = number_response["purchase_number"]
+        
+        purchase = Purchase(
+            purchase_number=purchase_number,
+            supplier_id=purchase_data.supplier_id,
+            invoice_number=purchase_data.invoice_number,
+            purchase_date=purchase_data.purchase_date or datetime.utcnow(),
+            user_id=current_user.id,
+            notes=purchase_data.notes
+        )
+        
+        purchase_dict = purchase.dict()
+        purchase_dict["_id"] = ObjectId(purchase_dict["id"])
+        del purchase_dict["id"]
+        
+        result = await db.purchases.insert_one(purchase_dict)
+        purchase_dict["id"] = str(result.inserted_id)
+        del purchase_dict["_id"]
+        
+        return Purchase(**purchase_dict)
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid supplier ID")
+        raise HTTPException(status_code=400, detail="Error creating purchase")
+
+@api_router.get("/purchases", response_model=List[dict])
+async def get_purchases(
+    current_user: UserResponse = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
+    """Get purchases with supplier details"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        purchases = await db.purchases.find().sort("purchase_date", -1).skip(offset).limit(limit).to_list(limit)
+        
+        result = []
+        for purchase in purchases:
+            try:
+                # Get supplier details
+                supplier = await db.suppliers.find_one({"_id": ObjectId(purchase["supplier_id"])})
+                
+                # Get purchase items count and total
+                items_count = await db.purchase_items.count_documents({"purchase_id": str(purchase["_id"])})
+                
+                purchase_data = {
+                    "id": str(purchase["_id"]),
+                    "purchase_number": purchase["purchase_number"],
+                    "supplier_name": supplier["name"] if supplier else "Fournisseur inconnu",
+                    "invoice_number": purchase["invoice_number"],
+                    "purchase_date": purchase["purchase_date"],
+                    "total_amount": purchase["total_amount"],
+                    "items_count": items_count,
+                    "notes": purchase.get("notes"),
+                    "created_at": purchase["created_at"]
+                }
+                result.append(purchase_data)
+            except Exception as e:
+                print(f"Error processing purchase {purchase.get('_id')}: {e}")
+                continue
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching purchases: {str(e)}")
+
+@api_router.get("/purchases/{purchase_id}", response_model=Purchase)
+async def get_purchase(
+    purchase_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get specific purchase"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+        if not purchase:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        
+        purchase["id"] = str(purchase["_id"])
+        del purchase["_id"]
+        return Purchase(**purchase)
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid purchase ID")
+        raise HTTPException(status_code=400, detail="Error retrieving purchase")
+
+# ================================
+# Purchase Items Routes
+# ================================
+
+@api_router.get("/purchases/{purchase_id}/items", response_model=List[dict])
+async def get_purchase_items(
+    purchase_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Get all items in a purchase"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Verify purchase exists
+        purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+        if not purchase:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        
+        # Get purchase items with product details
+        purchase_items = await db.purchase_items.find({"purchase_id": purchase_id}).to_list(100)
+        
+        result_items = []
+        for item in purchase_items:
+            try:
+                product = await db.products.find_one({"_id": ObjectId(item["product_id"])})
+                if product:
+                    result_item = {
+                        "id": str(item["_id"]),
+                        "purchase_id": item["purchase_id"],
+                        "product_id": item["product_id"],
+                        "quantity": item["quantity"],
+                        "unit_cost": item["unit_cost"],
+                        "total_cost": item["total_cost"],
+                        "product_name": product["name"],
+                        "product_code": product["code"],
+                        "product_image": product.get("image")
+                    }
+                    result_items.append(result_item)
+            except Exception as e:
+                print(f"Error processing purchase item {item.get('_id')}: {e}")
+                continue
+        
+        return result_items
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid purchase ID")
+        raise HTTPException(status_code=400, detail="Error retrieving purchase items")
+
+@api_router.post("/purchases/{purchase_id}/items")
+async def add_item_to_purchase(
+    purchase_id: str,
+    item_data: PurchaseItemCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Add item to purchase"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Verify purchase exists
+        purchase = await db.purchases.find_one({"_id": ObjectId(purchase_id)})
+        if not purchase:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+        
+        # Verify product exists
+        product = await db.products.find_one({"_id": ObjectId(item_data.product_id)})
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        
+        # Check if item already exists in purchase
+        existing_item = await db.purchase_items.find_one({
+            "purchase_id": purchase_id,
+            "product_id": item_data.product_id
+        })
+        
+        if existing_item:
+            # Update existing item
+            new_quantity = existing_item["quantity"] + item_data.quantity
+            new_total = new_quantity * item_data.unit_cost
+            
+            await db.purchase_items.update_one(
+                {"_id": existing_item["_id"]},
+                {"$set": {
+                    "quantity": new_quantity,
+                    "unit_cost": item_data.unit_cost,  # Update unit cost
+                    "total_cost": new_total
+                }}
+            )
+            
+            item_dict = {
+                "id": str(existing_item["_id"]),
+                "purchase_id": purchase_id,
+                "product_id": item_data.product_id,
+                "quantity": new_quantity,
+                "unit_cost": item_data.unit_cost,
+                "total_cost": new_total
+            }
+        else:
+            # Create new item
+            purchase_item = PurchaseItem(
+                purchase_id=purchase_id,
+                product_id=item_data.product_id,
+                quantity=item_data.quantity,
+                unit_cost=item_data.unit_cost,
+                total_cost=item_data.quantity * item_data.unit_cost
+            )
+            
+            item_dict = purchase_item.dict()
+            item_dict["_id"] = ObjectId(item_dict["id"])
+            del item_dict["id"]
+            
+            result = await db.purchase_items.insert_one(item_dict)
+            item_dict["id"] = str(result.inserted_id)
+            del item_dict["_id"]
+        
+        # Update purchase total
+        await update_purchase_total(purchase_id)
+        
+        return item_dict
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid ID")
+        raise HTTPException(status_code=400, detail="Error adding item to purchase")
+
+@api_router.post("/purchases/{purchase_id}/finalize")
+async def finalize_purchase(
+    purchase_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """Finalize purchase and update product stocks"""
+    # Check if user has permission (admin or manager)
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        # Get purchase items
+        purchase_items = await db.purchase_items.find({"purchase_id": purchase_id}).to_list(100)
+        
+        if not purchase_items:
+            raise HTTPException(status_code=400, detail="No items in purchase")
+        
+        # Update stock for all items in the purchase
+        for item in purchase_items:
+            # Increase product stock
+            await db.products.update_one(
+                {"_id": ObjectId(item["product_id"])},
+                {"$inc": {"stock": item["quantity"]}}
+            )
+        
+        # Update purchase total if not already done
+        await update_purchase_total(purchase_id)
+        
+        return {
+            "message": "Purchase finalized successfully",
+            "purchase_id": purchase_id,
+            "items_processed": len(purchase_items)
+        }
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid purchase ID")
+        raise HTTPException(status_code=400, detail=f"Error finalizing purchase: {str(e)}")
+
+# Helper function to update purchase total
+async def update_purchase_total(purchase_id: str):
+    """Calculate and update purchase total amount"""
+    try:
+        # Calculate total from purchase items
+        pipeline = [
+            {"$match": {"purchase_id": purchase_id}},
+            {"$group": {
+                "_id": None,
+                "total": {"$sum": "$total_cost"}
+            }}
+        ]
+        
+        result = list(await db.purchase_items.aggregate(pipeline).to_list(1))
+        total_amount = result[0]["total"] if result else 0.0
+        
+        # Update purchase
+        await db.purchases.update_one(
+            {"_id": ObjectId(purchase_id)},
+            {"$set": {"total_amount": total_amount}}
+        )
+        
+        return total_amount
+    except Exception as e:
+        print(f"Error updating purchase total: {e}")
+        return 0.0
+
+# ================================
 # Debt Management Routes
 # ================================
 
