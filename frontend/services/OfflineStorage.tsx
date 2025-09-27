@@ -220,8 +220,9 @@ class OfflineStorageService {
         return { success: true, results: [] };
       }
 
+      const deviceId = await this.ensureDeviceId();
       const syncBatch = {
-        device_id: this.deviceId,
+        device_id: deviceId,
         sync_items: validItems
       };
 
