@@ -16,798 +16,514 @@ ADMIN_PASSWORD = "admin123"
 
 class BackendTester:
     def __init__(self):
-        self.base_url = BASE_URL
-        self.token = None
-        self.headers = {}
+        self.admin_token = None
+        self.manager_token = None
+        self.server_token = None
+        self.test_users = {}
         self.test_results = []
-        self.device_id = f"test_device_{int(time.time())}"
         
     def log_test(self, test_name: str, success: bool, details: str = ""):
         """Log test result"""
         status = "✅ PASS" if success else "❌ FAIL"
+        result = f"{status} - {test_name}"
+        if details:
+            result += f": {details}"
+        print(result)
         self.test_results.append({
             "test": test_name,
-            "status": status,
             "success": success,
             "details": details
         })
-        print(f"{status}: {test_name}")
-        if details:
-            print(f"   Details: {details}")
-    
-    def authenticate(self) -> bool:
-        """Authenticate and get token"""
-        try:
-            # First initialize the app
-            init_response = requests.post(f"{self.base_url}/setup/init")
-            print(f"App initialization: {init_response.status_code}")
+        
+    def make_request(self, method: str, endpoint: str, token: str = None, data: dict = None) -> requests.Response:
+        """Make HTTP request with optional authentication"""
+        url = f"{BASE_URL}{endpoint}"
+        headers = {"Content-Type": "application/json"}
+        
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
             
-            # Login
-            login_data = {
+        try:
+            if method == "GET":
+                response = requests.get(url, headers=headers, timeout=30)
+            elif method == "POST":
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+            elif method == "PUT":
+                response = requests.put(url, headers=headers, json=data, timeout=30)
+            elif method == "PATCH":
+                response = requests.patch(url, headers=headers, json=data, timeout=30)
+            elif method == "DELETE":
+                response = requests.delete(url, headers=headers, timeout=30)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+                
+            return response
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            raise
+    
+    def authenticate_admin(self) -> bool:
+        """Authenticate as admin user"""
+        try:
+            response = self.make_request("POST", "/auth/login", data={
                 "email": ADMIN_EMAIL,
                 "password": ADMIN_PASSWORD
-            }
-            
-            response = requests.post(f"{self.base_url}/auth/login", json=login_data)
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.token = data["access_token"]
-                self.headers = {"Authorization": f"Bearer {self.token}"}
-                self.log_test("Authentication", True, f"Token obtained for {data['user']['email']}")
-                return True
-            else:
-                self.log_test("Authentication", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Authentication", False, f"Exception: {str(e)}")
-            return False
-    
-    def setup_test_data(self) -> Dict[str, Any]:
-        """Setup test data for sync operations"""
-        test_data = {}
-        
-        try:
-            # Get categories
-            categories_response = requests.get(f"{self.base_url}/categories", headers=self.headers)
-            if categories_response.status_code == 200:
-                categories = categories_response.json()
-                test_data['category_id'] = categories[0]['id'] if categories else None
-            
-            # Get payment methods
-            payment_methods_response = requests.get(f"{self.base_url}/payment-methods", headers=self.headers)
-            if payment_methods_response.status_code == 200:
-                payment_methods = payment_methods_response.json()
-                test_data['payment_method_id'] = payment_methods[0]['id'] if payment_methods else None
-            
-            # Create a test product for sync operations
-            product_data = {
-                "name": "Produit Test Sync",
-                "code": f"SYNC{int(time.time())}",
-                "category_id": test_data['category_id'],
-                "purchase_price": 100.0,
-                "selling_price": 150.0,
-                "stock": 50
-            }
-            
-            product_response = requests.post(f"{self.base_url}/products", json=product_data, headers=self.headers)
-            if product_response.status_code == 200:
-                test_data['product'] = product_response.json()
-                test_data['product_id'] = test_data['product']['id']
-            
-            # Create a test supplier
-            supplier_data = {
-                "name": f"Fournisseur Test Sync {int(time.time())}",
-                "contact_person": "Jean Dupont",
-                "phone": "+33123456789",
-                "email": "jean@supplier.com"
-            }
-            
-            supplier_response = requests.post(f"{self.base_url}/suppliers", json=supplier_data, headers=self.headers)
-            if supplier_response.status_code == 200:
-                test_data['supplier'] = supplier_response.json()
-                test_data['supplier_id'] = test_data['supplier']['id']
-            
-            self.log_test("Test Data Setup", True, f"Created product, supplier, got categories and payment methods")
-            return test_data
-            
-        except Exception as e:
-            self.log_test("Test Data Setup", False, f"Exception: {str(e)}")
-            return {}
-    
-    def test_sync_upload_sale_creation(self, test_data: Dict[str, Any]) -> bool:
-        """Test POST /api/sync/upload - Sale creation"""
-        try:
-            sync_id = f"sale_sync_{int(time.time())}"
-            sale_number = f"VTE{int(time.time())}"
-            
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": sync_id,
-                        "data_type": "sale",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "sale_number": sale_number,
-                            "status": "completed",
-                            "total_amount": 300.0,
-                            "payment_status": "paid",
-                            "created_at": datetime.utcnow().isoformat(),
-                            "completed_at": datetime.utcnow().isoformat(),
-                            "items": [
-                                {
-                                    "product_id": test_data['product_id'],
-                                    "quantity": 2,
-                                    "unit_price": 150.0,
-                                    "total_price": 300.0
-                                }
-                            ],
-                            "payments": [
-                                {
-                                    "payment_method_id": test_data['payment_method_id'],
-                                    "amount": 300.0,
-                                    "created_at": datetime.utcnow().isoformat()
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'success':
-                    self.log_test("Sync Upload - Sale Creation", True, f"Sale synced successfully: {sale_number}")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Sale Creation", False, f"Sync failed: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Sale Creation", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Sale Creation", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_sale_conflict(self, test_data: Dict[str, Any]) -> bool:
-        """Test sync conflict detection for duplicate sale"""
-        try:
-            sync_id = f"sale_conflict_{int(time.time())}"
-            sale_number = f"VTE{int(time.time())}"
-            
-            # First upload
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": sync_id,
-                        "data_type": "sale",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "sale_number": sale_number,
-                            "status": "completed",
-                            "total_amount": 150.0,
-                            "payment_status": "paid",
-                            "created_at": datetime.utcnow().isoformat(),
-                            "completed_at": datetime.utcnow().isoformat(),
-                            "items": [
-                                {
-                                    "product_id": test_data['product_id'],
-                                    "quantity": 1,
-                                    "unit_price": 150.0,
-                                    "total_price": 150.0
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-            
-            # First upload should succeed
-            response1 = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            # Second upload with same sync_id should detect conflict
-            response2 = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response2.status_code == 200:
-                data = response2.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'conflict':
-                    self.log_test("Sync Upload - Sale Conflict Detection", True, f"Conflict detected correctly for duplicate sale")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Sale Conflict Detection", False, f"Expected conflict, got: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Sale Conflict Detection", False, f"Status: {response2.status_code}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Sale Conflict Detection", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_product_update(self, test_data: Dict[str, Any]) -> bool:
-        """Test POST /api/sync/upload - Product update"""
-        try:
-            sync_id = f"product_sync_{int(time.time())}"
-            
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": sync_id,
-                        "data_type": "product",
-                        "action": "update",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "id": test_data['product_id'],
-                            "name": "Produit Test Sync Modifié",
-                            "selling_price": 175.0,
-                            "stock": 45,
-                            "updated_at": datetime.utcnow().isoformat()
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'success':
-                    self.log_test("Sync Upload - Product Update", True, f"Product updated successfully")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Product Update", False, f"Update failed: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Product Update", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Product Update", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_product_conflict(self, test_data: Dict[str, Any]) -> bool:
-        """Test product update conflict detection"""
-        try:
-            # First, update the product on server to create a newer timestamp
-            update_data = {
-                "name": "Produit Serveur Plus Récent",
-                "code": test_data['product']['code'],
-                "category_id": test_data['product']['category_id'],
-                "purchase_price": test_data['product']['purchase_price'],
-                "selling_price": 200.0,
-                "stock": 40
-            }
-            
-            server_update = requests.put(f"{self.base_url}/products/{test_data['product_id']}", 
-                                       json=update_data, headers=self.headers)
-            
-            if server_update.status_code != 200:
-                self.log_test("Sync Upload - Product Conflict Setup", False, "Failed to update product on server")
-                return False
-            
-            # Wait a moment to ensure timestamp difference
-            time.sleep(1)
-            
-            # Now try to sync an older update from client
-            sync_id = f"product_conflict_{int(time.time())}"
-            old_timestamp = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
-            
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": sync_id,
-                        "data_type": "product",
-                        "action": "update",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "id": test_data['product_id'],
-                            "name": "Produit Client Ancien",
-                            "selling_price": 160.0,
-                            "stock": 35,
-                            "updated_at": old_timestamp
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'conflict':
-                    self.log_test("Sync Upload - Product Conflict Detection", True, f"Conflict detected for older client version")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Product Conflict Detection", False, f"Expected conflict, got: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Product Conflict Detection", False, f"Status: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Product Conflict Detection", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_purchase_creation(self, test_data: Dict[str, Any]) -> bool:
-        """Test POST /api/sync/upload - Purchase creation"""
-        try:
-            sync_id = f"purchase_sync_{int(time.time())}"
-            purchase_number = f"ACH{int(time.time())}"
-            
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": sync_id,
-                        "data_type": "purchase",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "purchase_number": purchase_number,
-                            "supplier_id": test_data['supplier_id'],
-                            "invoice_number": f"INV{int(time.time())}",
-                            "purchase_date": datetime.utcnow().isoformat(),
-                            "total_amount": 500.0,
-                            "notes": "Achat synchronisé depuis offline",
-                            "created_at": datetime.utcnow().isoformat(),
-                            "items": [
-                                {
-                                    "product_id": test_data['product_id'],
-                                    "quantity": 5,
-                                    "unit_cost": 100.0,
-                                    "total_cost": 500.0
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'success':
-                    self.log_test("Sync Upload - Purchase Creation", True, f"Purchase synced successfully: {purchase_number}")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Purchase Creation", False, f"Sync failed: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Purchase Creation", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Purchase Creation", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_batch_multiple_items(self, test_data: Dict[str, Any]) -> bool:
-        """Test uploading multiple items in a single batch"""
-        try:
-            timestamp = int(time.time())
-            
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": f"batch_sale_{timestamp}",
-                        "data_type": "sale",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "sale_number": f"VTE{timestamp}",
-                            "status": "completed",
-                            "total_amount": 150.0,
-                            "payment_status": "paid",
-                            "created_at": datetime.utcnow().isoformat(),
-                            "completed_at": datetime.utcnow().isoformat(),
-                            "items": [
-                                {
-                                    "product_id": test_data['product_id'],
-                                    "quantity": 1,
-                                    "unit_price": 150.0,
-                                    "total_price": 150.0
-                                }
-                            ]
-                        }
-                    },
-                    {
-                        "sync_id": f"batch_purchase_{timestamp}",
-                        "data_type": "purchase",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "purchase_number": f"ACH{timestamp}",
-                            "supplier_id": test_data['supplier_id'],
-                            "invoice_number": f"BATCH{timestamp}",
-                            "purchase_date": datetime.utcnow().isoformat(),
-                            "total_amount": 200.0,
-                            "created_at": datetime.utcnow().isoformat(),
-                            "items": [
-                                {
-                                    "product_id": test_data['product_id'],
-                                    "quantity": 2,
-                                    "unit_cost": 100.0,
-                                    "total_cost": 200.0
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if len(results) == 2 and all(r['status'] == 'success' for r in results):
-                    self.log_test("Sync Upload - Batch Multiple Items", True, f"Batch with 2 items processed successfully")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Batch Multiple Items", False, f"Batch processing failed: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Batch Multiple Items", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Batch Multiple Items", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_upload_invalid_data(self) -> bool:
-        """Test sync upload with invalid data"""
-        try:
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": f"invalid_sync_{int(time.time())}",
-                        "data_type": "sale",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "sale_number": f"INVALID{int(time.time())}",
-                            "status": "completed",
-                            "total_amount": 150.0,
-                            "items": [
-                                {
-                                    "product_id": "invalid_product_id",  # Invalid product ID
-                                    "quantity": 1,
-                                    "unit_price": 150.0,
-                                    "total_price": 150.0
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get('results', [])
-                
-                if results and results[0]['status'] == 'error':
-                    self.log_test("Sync Upload - Invalid Data Handling", True, f"Invalid data correctly rejected")
-                    return True
-                else:
-                    self.log_test("Sync Upload - Invalid Data Handling", False, f"Expected error, got: {results}")
-                    return False
-            else:
-                self.log_test("Sync Upload - Invalid Data Handling", False, f"Status: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Upload - Invalid Data Handling", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_download_all_data(self) -> bool:
-        """Test GET /api/sync/download - Download all data types"""
-        try:
-            response = requests.get(f"{self.base_url}/sync/download", headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                sync_data = data.get('data', {})
-                
-                expected_types = ['products', 'categories', 'payment_methods', 'suppliers']
-                found_types = list(sync_data.keys())
-                
-                if all(data_type in found_types for data_type in expected_types):
-                    self.log_test("Sync Download - All Data Types", True, f"Downloaded: {found_types}")
-                    return True
-                else:
-                    self.log_test("Sync Download - All Data Types", False, f"Missing data types. Found: {found_types}")
-                    return False
-            else:
-                self.log_test("Sync Download - All Data Types", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Download - All Data Types", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_download_with_filters(self) -> bool:
-        """Test GET /api/sync/download with date and type filters"""
-        try:
-            # Test with date filter
-            last_sync = (datetime.utcnow() - timedelta(hours=1)).isoformat()
-            params = {
-                "last_sync": last_sync,
-                "data_types": "products,categories"
-            }
-            
-            response = requests.get(f"{self.base_url}/sync/download", params=params, headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                sync_data = data.get('data', {})
-                
-                # Should only have products and categories
-                if 'products' in sync_data and 'categories' in sync_data:
-                    if 'suppliers' not in sync_data and 'payment_methods' not in sync_data:
-                        self.log_test("Sync Download - With Filters", True, f"Filtered data correctly: {list(sync_data.keys())}")
-                        return True
-                    else:
-                        self.log_test("Sync Download - With Filters", False, f"Filter not applied correctly: {list(sync_data.keys())}")
-                        return False
-                else:
-                    self.log_test("Sync Download - With Filters", False, f"Missing expected data types: {list(sync_data.keys())}")
-                    return False
-            else:
-                self.log_test("Sync Download - With Filters", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Download - With Filters", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_download_permissions(self) -> bool:
-        """Test sync download respects user permissions"""
-        try:
-            # Create a server user (limited permissions)
-            server_user_data = {
-                "email": f"server{int(time.time())}@test.com",
-                "password": "server123",
-                "role": "serveur",
-                "name": "Serveur Test"
-            }
-            
-            register_response = requests.post(f"{self.base_url}/auth/register", json=server_user_data)
-            
-            if register_response.status_code != 200:
-                self.log_test("Sync Download - Permissions Setup", False, "Failed to create server user")
-                return False
-            
-            # Login as server user
-            login_response = requests.post(f"{self.base_url}/auth/login", json={
-                "email": server_user_data["email"],
-                "password": server_user_data["password"]
             })
             
-            if login_response.status_code != 200:
-                self.log_test("Sync Download - Permissions Login", False, "Failed to login as server user")
-                return False
-            
-            server_token = login_response.json()["access_token"]
-            server_headers = {"Authorization": f"Bearer {server_token}"}
-            
-            # Try to download data as server user
-            response = requests.get(f"{self.base_url}/sync/download", headers=server_headers)
-            
             if response.status_code == 200:
                 data = response.json()
-                sync_data = data.get('data', {})
-                
-                # Server user should not have access to suppliers
-                if 'suppliers' not in sync_data:
-                    self.log_test("Sync Download - Permissions Check", True, f"Server user correctly denied suppliers access")
-                    return True
-                else:
-                    self.log_test("Sync Download - Permissions Check", False, f"Server user incorrectly has suppliers access")
-                    return False
+                self.admin_token = data["access_token"]
+                self.log_test("Admin Authentication", True, f"Token obtained for {ADMIN_EMAIL}")
+                return True
             else:
-                self.log_test("Sync Download - Permissions Check", False, f"Status: {response.status_code}")
+                self.log_test("Admin Authentication", False, f"Status: {response.status_code}, Response: {response.text}")
                 return False
-                
         except Exception as e:
-            self.log_test("Sync Download - Permissions Check", False, f"Exception: {str(e)}")
+            self.log_test("Admin Authentication", False, f"Exception: {str(e)}")
             return False
     
-    def test_sync_status_device(self) -> bool:
-        """Test GET /api/sync/status/{device_id}"""
-        try:
-            response = requests.get(f"{self.base_url}/sync/status/{self.device_id}", headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
+    def create_test_users(self) -> bool:
+        """Create test users with different roles"""
+        test_users_data = [
+            {"email": "manager.test@salesmanager.com", "password": "manager123", "role": "gérant", "name": "Test Manager"},
+            {"email": "server.test@salesmanager.com", "password": "server123", "role": "serveur", "name": "Test Server"}
+        ]
+        
+        success_count = 0
+        for user_data in test_users_data:
+            try:
+                response = self.make_request("POST", "/auth/register", data=user_data)
                 
-                required_fields = ['device_id', 'last_sync', 'status']
-                if all(field in data for field in required_fields):
-                    if data['device_id'] == self.device_id:
-                        self.log_test("Sync Status - Device Status", True, f"Status: {data['status']}, Last sync: {data['last_sync']}")
-                        return True
-                    else:
-                        self.log_test("Sync Status - Device Status", False, f"Wrong device ID returned")
-                        return False
-                else:
-                    self.log_test("Sync Status - Device Status", False, f"Missing required fields: {data}")
-                    return False
-            else:
-                self.log_test("Sync Status - Device Status", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Status - Device Status", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_sync_status_never_synced(self) -> bool:
-        """Test sync status for device that never synced"""
-        try:
-            new_device_id = f"never_synced_{int(time.time())}"
-            response = requests.get(f"{self.base_url}/sync/status/{new_device_id}", headers=self.headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if data.get('status') == 'never_synced' and data.get('last_sync') is None:
-                    self.log_test("Sync Status - Never Synced Device", True, f"Correctly identified never synced device")
-                    return True
-                else:
-                    self.log_test("Sync Status - Never Synced Device", False, f"Incorrect status for never synced device: {data}")
-                    return False
-            else:
-                self.log_test("Sync Status - Never Synced Device", False, f"Status: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            self.log_test("Sync Status - Never Synced Device", False, f"Exception: {str(e)}")
-            return False
-    
-    def test_unsupported_sync_type(self) -> bool:
-        """Test sync upload with unsupported data type"""
-        try:
-            sync_batch = {
-                "device_id": self.device_id,
-                "sync_items": [
-                    {
-                        "sync_id": f"unsupported_{int(time.time())}",
-                        "data_type": "unsupported_type",
-                        "action": "create",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {"test": "data"}
+                if response.status_code == 200:
+                    user_info = response.json()
+                    self.test_users[user_data["role"]] = {
+                        "id": user_info["id"],
+                        "email": user_data["email"],
+                        "password": user_data["password"],
+                        "role": user_data["role"]
                     }
-                ]
-            }
-            
-            response = requests.post(f"{self.base_url}/sync/upload", json=sync_batch, headers=self.headers)
+                    self.log_test(f"Create Test User ({user_data['role']})", True, f"User ID: {user_info['id']}")
+                    success_count += 1
+                else:
+                    self.log_test(f"Create Test User ({user_data['role']})", False, f"Status: {response.status_code}")
+            except Exception as e:
+                self.log_test(f"Create Test User ({user_data['role']})", False, f"Exception: {str(e)}")
+        
+        return success_count == len(test_users_data)
+    
+    def authenticate_test_users(self) -> bool:
+        """Authenticate test users and get their tokens"""
+        success_count = 0
+        
+        for role, user_info in self.test_users.items():
+            try:
+                response = self.make_request("POST", "/auth/login", data={
+                    "email": user_info["email"],
+                    "password": user_info["password"]
+                })
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if role == "gérant":
+                        self.manager_token = data["access_token"]
+                    elif role == "serveur":
+                        self.server_token = data["access_token"]
+                    
+                    self.log_test(f"Authenticate Test User ({role})", True, f"Token obtained")
+                    success_count += 1
+                else:
+                    self.log_test(f"Authenticate Test User ({role})", False, f"Status: {response.status_code}")
+            except Exception as e:
+                self.log_test(f"Authenticate Test User ({role})", False, f"Exception: {str(e)}")
+        
+        return success_count == len(self.test_users)
+    
+    def test_role_information_api(self):
+        """Test GET /api/roles endpoint"""
+        try:
+            # Test with admin token
+            response = self.make_request("GET", "/roles", token=self.admin_token)
             
             if response.status_code == 200:
                 data = response.json()
-                results = data.get('results', [])
+                roles = data.get("roles", [])
                 
-                if results and results[0]['status'] == 'error' and 'Unsupported sync type' in results[0].get('error_message', ''):
-                    self.log_test("Sync Upload - Unsupported Type", True, f"Unsupported type correctly rejected")
-                    return True
+                expected_roles = ["admin", "gérant", "serveur"]
+                found_roles = [role["value"] for role in roles]
+                
+                if all(role in found_roles for role in expected_roles):
+                    self.log_test("GET /api/roles - Admin Access", True, f"Found {len(roles)} roles")
                 else:
-                    self.log_test("Sync Upload - Unsupported Type", False, f"Expected error for unsupported type: {results}")
-                    return False
+                    self.log_test("GET /api/roles - Admin Access", False, f"Missing roles. Found: {found_roles}")
             else:
-                self.log_test("Sync Upload - Unsupported Type", False, f"Status: {response.status_code}")
-                return False
+                self.log_test("GET /api/roles - Admin Access", False, f"Status: {response.status_code}")
+                
+            # Test with manager token
+            response = self.make_request("GET", "/roles", token=self.manager_token)
+            if response.status_code == 200:
+                self.log_test("GET /api/roles - Manager Access", True, "Manager can access roles")
+            else:
+                self.log_test("GET /api/roles - Manager Access", False, f"Status: {response.status_code}")
+                
+            # Test with server token
+            response = self.make_request("GET", "/roles", token=self.server_token)
+            if response.status_code == 200:
+                self.log_test("GET /api/roles - Server Access", True, "Server can access roles")
+            else:
+                self.log_test("GET /api/roles - Server Access", False, f"Status: {response.status_code}")
                 
         except Exception as e:
-            self.log_test("Sync Upload - Unsupported Type", False, f"Exception: {str(e)}")
-            return False
+            self.log_test("GET /api/roles", False, f"Exception: {str(e)}")
+    
+    def test_user_management_api(self):
+        """Test user management endpoints"""
+        # Test GET /api/users (Admin only)
+        try:
+            response = self.make_request("GET", "/users", token=self.admin_token)
+            if response.status_code == 200:
+                users = response.json()
+                self.log_test("GET /api/users - Admin Access", True, f"Retrieved {len(users)} users")
+            else:
+                self.log_test("GET /api/users - Admin Access", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("GET /api/users - Admin Access", False, f"Exception: {str(e)}")
+        
+        # Test GET /api/users with non-admin (should fail)
+        try:
+            response = self.make_request("GET", "/users", token=self.manager_token)
+            if response.status_code == 403:
+                self.log_test("GET /api/users - Manager Access (Should Fail)", True, "Correctly denied access")
+            else:
+                self.log_test("GET /api/users - Manager Access (Should Fail)", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("GET /api/users - Manager Access (Should Fail)", False, f"Exception: {str(e)}")
+        
+        try:
+            response = self.make_request("GET", "/users", token=self.server_token)
+            if response.status_code == 403:
+                self.log_test("GET /api/users - Server Access (Should Fail)", True, "Correctly denied access")
+            else:
+                self.log_test("GET /api/users - Server Access (Should Fail)", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("GET /api/users - Server Access (Should Fail)", False, f"Exception: {str(e)}")
+    
+    def test_role_update_api(self):
+        """Test PATCH /api/users/{id}/role endpoint"""
+        if not self.test_users:
+            self.log_test("Role Update Tests", False, "No test users available")
+            return
+            
+        manager_user = self.test_users.get("gérant")
+        if not manager_user:
+            self.log_test("Role Update Tests", False, "Manager test user not found")
+            return
+        
+        # Test valid role update (Admin changing manager to server)
+        try:
+            response = self.make_request("PATCH", f"/users/{manager_user['id']}/role", 
+                                       token=self.admin_token, 
+                                       data={"role": "serveur"})
+            
+            if response.status_code == 200:
+                updated_user = response.json()
+                if updated_user["role"] == "serveur":
+                    self.log_test("PATCH /api/users/{id}/role - Valid Update", True, "Role updated successfully")
+                    
+                    # Update back to manager for other tests
+                    self.make_request("PATCH", f"/users/{manager_user['id']}/role", 
+                                    token=self.admin_token, 
+                                    data={"role": "gérant"})
+                else:
+                    self.log_test("PATCH /api/users/{id}/role - Valid Update", False, "Role not updated correctly")
+            else:
+                self.log_test("PATCH /api/users/{id}/role - Valid Update", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("PATCH /api/users/{id}/role - Valid Update", False, f"Exception: {str(e)}")
+        
+        # Test invalid role
+        try:
+            response = self.make_request("PATCH", f"/users/{manager_user['id']}/role", 
+                                       token=self.admin_token, 
+                                       data={"role": "invalid_role"})
+            
+            if response.status_code == 400:
+                self.log_test("PATCH /api/users/{id}/role - Invalid Role", True, "Correctly rejected invalid role")
+            else:
+                self.log_test("PATCH /api/users/{id}/role - Invalid Role", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("PATCH /api/users/{id}/role - Invalid Role", False, f"Exception: {str(e)}")
+        
+        # Test non-admin trying to update role
+        try:
+            response = self.make_request("PATCH", f"/users/{manager_user['id']}/role", 
+                                       token=self.manager_token, 
+                                       data={"role": "admin"})
+            
+            if response.status_code == 403:
+                self.log_test("PATCH /api/users/{id}/role - Non-Admin Access", True, "Correctly denied access")
+            else:
+                self.log_test("PATCH /api/users/{id}/role - Non-Admin Access", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("PATCH /api/users/{id}/role - Non-Admin Access", False, f"Exception: {str(e)}")
+    
+    def test_self_protection_logic(self):
+        """Test that admin cannot change own role or deactivate own account"""
+        # Get admin user info
+        try:
+            response = self.make_request("GET", "/auth/me", token=self.admin_token)
+            if response.status_code == 200:
+                admin_user = response.json()
+                admin_id = admin_user["id"]
+                
+                # Test admin trying to change own role
+                response = self.make_request("PATCH", f"/users/{admin_id}/role", 
+                                           token=self.admin_token, 
+                                           data={"role": "gérant"})
+                
+                if response.status_code == 400:
+                    self.log_test("Self-Protection - Role Change", True, "Admin cannot change own role")
+                else:
+                    self.log_test("Self-Protection - Role Change", False, f"Status: {response.status_code}")
+                
+                # Test admin trying to deactivate own account
+                response = self.make_request("DELETE", f"/users/{admin_id}", token=self.admin_token)
+                
+                if response.status_code == 400:
+                    self.log_test("Self-Protection - Account Deactivation", True, "Admin cannot deactivate own account")
+                else:
+                    self.log_test("Self-Protection - Account Deactivation", False, f"Status: {response.status_code}")
+            else:
+                self.log_test("Self-Protection Tests", False, "Could not get admin user info")
+        except Exception as e:
+            self.log_test("Self-Protection Tests", False, f"Exception: {str(e)}")
+    
+    def test_user_deactivation(self):
+        """Test DELETE /api/users/{id} endpoint"""
+        if not self.test_users:
+            self.log_test("User Deactivation Tests", False, "No test users available")
+            return
+            
+        server_user = self.test_users.get("serveur")
+        if not server_user:
+            self.log_test("User Deactivation Tests", False, "Server test user not found")
+            return
+        
+        # Test admin deactivating user
+        try:
+            response = self.make_request("DELETE", f"/users/{server_user['id']}", token=self.admin_token)
+            
+            if response.status_code == 200:
+                self.log_test("DELETE /api/users/{id} - Admin Access", True, "User deactivated successfully")
+            else:
+                self.log_test("DELETE /api/users/{id} - Admin Access", False, f"Status: {response.status_code}")
+        except Exception as e:
+            self.log_test("DELETE /api/users/{id} - Admin Access", False, f"Exception: {str(e)}")
+        
+        # Test non-admin trying to deactivate user
+        manager_user = self.test_users.get("gérant")
+        if manager_user:
+            try:
+                response = self.make_request("DELETE", f"/users/{manager_user['id']}", token=self.manager_token)
+                
+                if response.status_code == 403:
+                    self.log_test("DELETE /api/users/{id} - Non-Admin Access", True, "Correctly denied access")
+                else:
+                    self.log_test("DELETE /api/users/{id} - Non-Admin Access", False, f"Status: {response.status_code}")
+            except Exception as e:
+                self.log_test("DELETE /api/users/{id} - Non-Admin Access", False, f"Exception: {str(e)}")
+    
+    def test_cross_endpoint_permissions(self):
+        """Test role-based permissions across different endpoints"""
+        
+        # Test Products endpoints
+        self.test_endpoint_permissions("/products", "GET", {
+            "admin": True, "manager": True, "server": True
+        })
+        
+        self.test_endpoint_permissions("/products", "POST", {
+            "admin": True, "manager": True, "server": False
+        }, data={"name": "Test Product", "code": "TEST001", "category_id": "507f1f77bcf86cd799439011", 
+                "purchase_price": 10.0, "selling_price": 15.0, "stock": 100})
+        
+        # Test Categories endpoints
+        self.test_endpoint_permissions("/categories", "GET", {
+            "admin": True, "manager": True, "server": True
+        })
+        
+        self.test_endpoint_permissions("/categories", "POST", {
+            "admin": True, "manager": True, "server": False
+        }, data={"name": "Test Category", "description": "Test description"})
+        
+        # Test Sales endpoints
+        self.test_endpoint_permissions("/sales", "POST", {
+            "admin": True, "manager": True, "server": True
+        })
+        
+        self.test_endpoint_permissions("/sales/pending", "GET", {
+            "admin": True, "manager": True, "server": True
+        })
+        
+        # Test Purchases endpoints (Admin/Manager only)
+        self.test_endpoint_permissions("/suppliers", "GET", {
+            "admin": True, "manager": True, "server": False
+        })
+        
+        self.test_endpoint_permissions("/purchases", "GET", {
+            "admin": True, "manager": True, "server": False
+        })
+        
+        # Test Reports endpoints
+        self.test_endpoint_permissions("/reports/sales-summary", "GET", {
+            "admin": True, "manager": True, "server": True
+        })
+        
+        self.test_endpoint_permissions("/reports/purchases-summary", "GET", {
+            "admin": True, "manager": True, "server": False
+        })
+        
+        self.test_endpoint_permissions("/reports/dashboard", "GET", {
+            "admin": True, "manager": True, "server": True
+        })
+    
+    def test_endpoint_permissions(self, endpoint: str, method: str, expected_access: dict, data: dict = None):
+        """Test endpoint permissions for different roles"""
+        tokens = {
+            "admin": self.admin_token,
+            "manager": self.manager_token,
+            "server": self.server_token
+        }
+        
+        for role, should_have_access in expected_access.items():
+            token = tokens.get(role)
+            if not token:
+                continue
+                
+            try:
+                response = self.make_request(method, endpoint, token=token, data=data)
+                
+                if should_have_access:
+                    # Should have access (200, 201, etc.)
+                    if response.status_code < 400:
+                        self.log_test(f"{method} {endpoint} - {role.title()} Access", True, f"Status: {response.status_code}")
+                    else:
+                        self.log_test(f"{method} {endpoint} - {role.title()} Access", False, f"Status: {response.status_code}")
+                else:
+                    # Should be denied (403)
+                    if response.status_code == 403:
+                        self.log_test(f"{method} {endpoint} - {role.title()} Access (Should Fail)", True, "Correctly denied access")
+                    else:
+                        self.log_test(f"{method} {endpoint} - {role.title()} Access (Should Fail)", False, f"Status: {response.status_code}")
+                        
+            except Exception as e:
+                self.log_test(f"{method} {endpoint} - {role.title()} Access", False, f"Exception: {str(e)}")
+    
+    def test_authentication_integration(self):
+        """Test that all role endpoints require valid JWT authentication"""
+        endpoints_to_test = [
+            "/users",
+            "/roles", 
+            "/products",
+            "/categories",
+            "/sales/pending",
+            "/suppliers",
+            "/purchases",
+            "/reports/dashboard"
+        ]
+        
+        for endpoint in endpoints_to_test:
+            try:
+                # Test without token
+                response = self.make_request("GET", endpoint)
+                
+                if response.status_code == 401:
+                    self.log_test(f"Authentication Required - {endpoint}", True, "Correctly requires authentication")
+                else:
+                    self.log_test(f"Authentication Required - {endpoint}", False, f"Status: {response.status_code}")
+                    
+            except Exception as e:
+                self.log_test(f"Authentication Required - {endpoint}", False, f"Exception: {str(e)}")
     
     def run_all_tests(self):
-        """Run all sync tests"""
+        """Run all role management tests"""
         print("=" * 80)
-        print("PHASE 7 SYNCHRONISATION OFFLINE/ONLINE - BACKEND TESTS")
+        print("PHASE 8: ROLE MANAGEMENT SYSTEM - COMPREHENSIVE BACKEND TESTING")
         print("=" * 80)
         
-        # Authenticate
-        if not self.authenticate():
-            print("❌ Authentication failed. Cannot proceed with tests.")
-            return
+        # Step 1: Authentication
+        print("\n1. AUTHENTICATION TESTS")
+        print("-" * 40)
+        if not self.authenticate_admin():
+            print("❌ CRITICAL: Admin authentication failed. Cannot proceed with tests.")
+            return False
         
-        # Setup test data
-        test_data = self.setup_test_data()
-        if not test_data:
-            print("❌ Test data setup failed. Cannot proceed with tests.")
-            return
+        # Step 2: Create and authenticate test users
+        print("\n2. TEST USER SETUP")
+        print("-" * 40)
+        self.create_test_users()
+        self.authenticate_test_users()
         
-        print(f"\n🔄 Testing with device_id: {self.device_id}")
-        print(f"📊 Test data: Product ID: {test_data.get('product_id')}, Supplier ID: {test_data.get('supplier_id')}")
+        # Step 3: Role Information API
+        print("\n3. ROLE INFORMATION API TESTS")
+        print("-" * 40)
+        self.test_role_information_api()
         
-        # Run sync upload tests
-        print("\n" + "=" * 50)
-        print("SYNC UPLOAD TESTS")
-        print("=" * 50)
+        # Step 4: User Management API
+        print("\n4. USER MANAGEMENT API TESTS")
+        print("-" * 40)
+        self.test_user_management_api()
         
-        self.test_sync_upload_sale_creation(test_data)
-        self.test_sync_upload_sale_conflict(test_data)
-        self.test_sync_upload_product_update(test_data)
-        self.test_sync_upload_product_conflict(test_data)
-        self.test_sync_upload_purchase_creation(test_data)
-        self.test_sync_upload_batch_multiple_items(test_data)
-        self.test_sync_upload_invalid_data()
-        self.test_unsupported_sync_type()
+        # Step 5: Role Update API
+        print("\n5. ROLE UPDATE API TESTS")
+        print("-" * 40)
+        self.test_role_update_api()
         
-        # Run sync download tests
-        print("\n" + "=" * 50)
-        print("SYNC DOWNLOAD TESTS")
-        print("=" * 50)
+        # Step 6: Self-Protection Logic
+        print("\n6. SELF-PROTECTION LOGIC TESTS")
+        print("-" * 40)
+        self.test_self_protection_logic()
         
-        self.test_sync_download_all_data()
-        self.test_sync_download_with_filters()
-        self.test_sync_download_permissions()
+        # Step 7: User Deactivation
+        print("\n7. USER DEACTIVATION TESTS")
+        print("-" * 40)
+        self.test_user_deactivation()
         
-        # Run sync status tests
-        print("\n" + "=" * 50)
-        print("SYNC STATUS TESTS")
-        print("=" * 50)
+        # Step 8: Cross-Endpoint Permissions
+        print("\n8. CROSS-ENDPOINT PERMISSION TESTS")
+        print("-" * 40)
+        self.test_cross_endpoint_permissions()
         
-        self.test_sync_status_device()
-        self.test_sync_status_never_synced()
+        # Step 9: Authentication Integration
+        print("\n9. AUTHENTICATION INTEGRATION TESTS")
+        print("-" * 40)
+        self.test_authentication_integration()
         
-        # Print summary
-        self.print_summary()
-    
-    def print_summary(self):
-        """Print test summary"""
+        # Summary
         print("\n" + "=" * 80)
         print("TEST SUMMARY")
         print("=" * 80)
         
         total_tests = len(self.test_results)
-        passed_tests = len([r for r in self.test_results if r['success']])
+        passed_tests = sum(1 for result in self.test_results if result["success"])
         failed_tests = total_tests - passed_tests
         
         print(f"Total Tests: {total_tests}")
-        print(f"✅ Passed: {passed_tests}")
-        print(f"❌ Failed: {failed_tests}")
+        print(f"Passed: {passed_tests} ✅")
+        print(f"Failed: {failed_tests} ❌")
         print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
         
         if failed_tests > 0:
-            print(f"\n❌ FAILED TESTS:")
+            print(f"\nFAILED TESTS:")
             for result in self.test_results:
-                if not result['success']:
-                    print(f"   - {result['test']}: {result['details']}")
+                if not result["success"]:
+                    print(f"❌ {result['test']}: {result['details']}")
         
-        print("\n" + "=" * 80)
-        
-        # Return success status
         return failed_tests == 0
 
 if __name__ == "__main__":
-    tester = SalesManagerSyncTester()
+    tester = BackendTester()
     success = tester.run_all_tests()
     
     if success:
-        print("🎉 ALL TESTS PASSED! Phase 7 Synchronisation is working correctly.")
+        print("\n🎉 ALL TESTS PASSED! Role Management System is fully functional.")
     else:
-        print("⚠️  Some tests failed. Please check the details above.")
+        print("\n⚠️  Some tests failed. Please review the issues above.")
