@@ -381,9 +381,12 @@ async def update_product(
             raise HTTPException(status_code=404, detail="Product not found")
         
         # Check if category exists
-        category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
-        if not category:
-            raise HTTPException(status_code=400, detail="Category not found")
+        try:
+            category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
+            if not category:
+                raise HTTPException(status_code=400, detail="Category not found")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid category ID")
         
         # Check if new code conflicts with another product
         code_conflict = await db.products.find_one({
@@ -411,6 +414,8 @@ async def update_product(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
 @api_router.delete("/products/{product_id}")
