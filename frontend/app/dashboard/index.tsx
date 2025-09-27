@@ -88,11 +88,7 @@ export default function DashboardScreen() {
   };
 
   const canAccessProducts = () => {
-    return user?.role === 'admin' || user?.role === 'gérant';
-  };
-
-  const canAccessPurchases = () => {
-    return user?.role === 'admin' || user?.role === 'gérant';
+    return canAccessPurchases(user?.role || '');
   };
 
   const canAccessSales = () => {
