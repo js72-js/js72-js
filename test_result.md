@@ -175,6 +175,20 @@ backend:
       - working: true
         agent: "testing"
         comment: "TESTS PHASE 5 BACKEND COMPLETS - TOUS RÉUSSIS ✅ API Gestion des Achats 100% FONCTIONNELLE. Tests 42/42 passés: 1) CRUD Fournisseurs complet: GET/POST/PUT/DELETE avec nom unique et désactivation. 2) Génération numéro achat unique (ACH+timestamp) avec vérification unicité. 3) CRUD Achats complet: POST/GET avec détails fournisseurs. 4) CRUD Articles d'achat: GET/POST avec détails produits et calculs totaux automatiques. 5) Finalisation achat avec mise à jour stock automatique (incrémentation). 6) Permissions parfaites: admin/gérant accès complet, serveur refusé (403). 7) Workflow complet testé: création fournisseur → création achat → ajout produits → vérification totaux → finalisation → vérification stock. API achats production-ready."
+  - task: "Rapports et Récapitulatifs - Backend"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Phase 6 Backend implémentée: API complète rapports et analytics avec GET /api/reports/sales-summary (filtres date, vendeur, mode paiement), GET /api/reports/purchases-summary (admin/gérant uniquement, filtres date, fournisseur), GET /api/reports/dashboard (statistiques complètes ventes/produits/achats/dettes), GET /api/reports/stock-status (état détaillé stock avec catégories). Calculs croissance mensuelle, top produits, statistiques agrégées. Prête pour tests."
+      - working: true
+        agent: "testing"
+        comment: "TESTS PHASE 6 BACKEND COMPLETS - TOUS RÉUSSIS ✅ API RAPPORTS ET ANALYTICS 100% FONCTIONNELLE. Tests 76/77 passés (98.7%): 1) GET /api/reports/sales-summary avec tous filtres (date, vendeur, mode paiement) - 7 ventes trouvées, total 2100.0. 2) GET /api/reports/purchases-summary avec permissions admin/gérant et filtres - 2 achats trouvés. 3) GET /api/reports/dashboard complet: statistiques ventes (7 total, croissance mensuelle), produits (4 total, stock normal), dettes (2 enregistrements), achats (admin uniquement). 4) GET /api/reports/stock-status: 4 produits, valeur stock 30100.0, statuts corrects (Normal/Faible/Rupture). 5) Permissions parfaites: serveur refusé (403) pour achats, admin accès complet. 6) Cohérence données entre tous rapports vérifiée. 7) Gestion dettes fonctionnelle. Seul échec mineur: gestion erreur 403 au lieu 401 (acceptable). API rapports production-ready."
 
 frontend:
   - task: "Infrastructure et Authentification"
