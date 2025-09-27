@@ -611,6 +611,65 @@ async def get_pending_sales(current_user: UserResponse = Depends(get_current_use
     
     return [Sale(**sale) for sale in sales]
 
+@api_router.get("/sales/history")
+async def get_sales_history(
+    current_user: UserResponse = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
+    """Get sales history with pagination"""
+    try:
+        # Get completed sales with pagination
+        sales = await db.sales.find(
+            {"status": "completed"}
+        ).sort("completed_at", -1).skip(offset).limit(limit).to_list(limit)
+        
+        result = []
+        for sale in sales:
+            try:
+                # Ensure we have the correct sale_id format
+                sale_id = str(sale["_id"]) if "_id" in sale else sale.get("id", "")
+                
+                # Get sale items count
+                items_count = await db.sale_items.count_documents({"sale_id": sale_id})
+                
+                # Get payments
+                payments = await db.payments.find({"sale_id": sale_id}).to_list(100)
+                payment_methods = []
+                
+                for payment in payments:
+                    try:
+                        method = await db.payment_methods.find_one({"_id": ObjectId(payment["payment_method_id"])})
+                        if method:
+                            payment_methods.append({
+                                "method_name": method["name"],
+                                "amount": payment["amount"]
+                            })
+                    except Exception as e:
+                        print(f"Error processing payment method {payment.get('payment_method_id')}: {e}")
+                        continue
+                
+                sale_data = {
+                    "id": sale_id,
+                    "sale_number": sale["sale_number"],
+                    "total_amount": sale["total_amount"],
+                    "payment_status": sale.get("payment_status", "paid"),
+                    "completed_at": sale.get("completed_at"),
+                    "created_at": sale["created_at"],
+                    "items_count": items_count,
+                    "payment_methods": payment_methods
+                }
+                result.append(sale_data)
+            except Exception as e:
+                print(f"Error processing sale {sale.get('_id', 'unknown')}: {e}")
+                continue
+        
+        return result
+        
+    except Exception as e:
+        print(f"Sales history error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error fetching sales history: {str(e)}")
+
 @api_router.get("/sales/{sale_id}", response_model=Sale)
 async def get_sale(sale_id: str, current_user: UserResponse = Depends(get_current_user)):
     """Get specific sale"""
