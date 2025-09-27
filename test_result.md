@@ -258,7 +258,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Rapports et Récapitulatifs - Backend"
+    - "Synchronisation Offline/Online - Backend"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
