@@ -181,7 +181,7 @@ export default function DashboardScreen() {
             </>
           )}
 
-          {canAccessPurchases() && (
+          {canAccessPurchases(user?.role || '') && (
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => router.push('/purchases')}
@@ -189,6 +189,19 @@ export default function DashboardScreen() {
               <View style={styles.menuItemContent}>
                 <Ionicons name="bag-add-outline" size={24} color="#fd7e14" />
                 <Text style={styles.menuItemText}>Gestion des Achats</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
+          )}
+
+          {canManageUsers(user?.role || '') && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => router.push('/users')}
+            >
+              <View style={styles.menuItemContent}>
+                <Ionicons name="people-outline" size={24} color="#dc3545" />
+                <Text style={styles.menuItemText}>Gestion des Utilisateurs</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#666" />
             </TouchableOpacity>
