@@ -230,8 +230,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Paiement et Finalisation - Backend"
-    - "Paiement et Finalisation - Frontend"
+    - "Gestion des Achats - Backend"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
