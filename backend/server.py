@@ -336,9 +336,12 @@ async def create_product(
         )
     
     # Check if category exists
-    category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
-    if not category:
-        raise HTTPException(status_code=400, detail="Category not found")
+    try:
+        category = await db.categories.find_one({"_id": ObjectId(product_data.category_id)})
+        if not category:
+            raise HTTPException(status_code=400, detail="Category not found")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid category ID")
     
     # Check if product code already exists
     existing_product = await db.products.find_one({"code": product_data.code})
