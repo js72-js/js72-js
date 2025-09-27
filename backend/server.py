@@ -680,9 +680,12 @@ async def get_sale_items(sale_id: str, current_user: UserResponse = Depends(get_
         # Get sale items with product details
         pipeline = [
             {"$match": {"sale_id": sale_id}},
+            {"$addFields": {
+                "product_object_id": {"$toObjectId": "$product_id"}
+            }},
             {"$lookup": {
                 "from": "products",
-                "localField": "product_id", 
+                "localField": "product_object_id", 
                 "foreignField": "_id",
                 "as": "product"
             }},
