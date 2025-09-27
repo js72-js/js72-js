@@ -321,6 +321,8 @@ async def get_product(product_id: str, current_user: UserResponse = Depends(get_
         del product["_id"]
         return Product(**product)
     except Exception as e:
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
 @api_router.post("/products", response_model=Product)
