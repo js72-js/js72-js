@@ -416,7 +416,13 @@ class BackendTester:
                 continue
                 
             try:
-                response = self.make_request(method, endpoint, token=token, data=data)
+                # Make data unique for each role if it contains a code field
+                test_data = data.copy() if data else None
+                if test_data and "code" in test_data:
+                    import random
+                    test_data["code"] = f"{test_data['code']}_{role}_{random.randint(100, 999)}"
+                
+                response = self.make_request(method, endpoint, token=token, data=test_data)
                 
                 if should_have_access:
                     # Should have access (200, 201, etc.)
