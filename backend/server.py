@@ -478,6 +478,8 @@ async def update_product_stock(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        if "not a valid ObjectId" in str(e):
+            raise HTTPException(status_code=400, detail="Invalid product ID")
         raise HTTPException(status_code=400, detail="Invalid product ID")
 
 # ================================
