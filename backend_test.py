@@ -204,9 +204,11 @@ class SalesManagerTester:
         """Test POST /api/auth/register"""
         print("=== Testing User Registration ===")
         
-        # Use realistic test data
+        # Use realistic test data with timestamp to ensure uniqueness
+        import time
+        timestamp = str(int(time.time()))
         user_data = {
-            "email": "marie.dupont@salesmanager.com",
+            "email": f"marie.dupont.{timestamp}@salesmanager.com",
             "password": "marie2025!",
             "role": "serveur",
             "name": "Marie Dupont"
