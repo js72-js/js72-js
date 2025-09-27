@@ -238,6 +238,46 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return UserResponse(**user)
 
 # ================================
+# Role-Based Access Control Functions
+# ================================
+
+def require_admin(current_user: UserResponse):
+    """Require admin role"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+def require_admin_or_manager(current_user: UserResponse):
+    """Require admin or manager role"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or Manager access required"
+        )
+
+def require_any_role(current_user: UserResponse):
+    """Allow any authenticated user (admin, manager, or server)"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.SERVER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Valid user role required"
+        )
+
+def can_access_purchases(current_user: UserResponse) -> bool:
+    """Check if user can access purchase management"""
+    return current_user.role in [UserRole.ADMIN, UserRole.MANAGER]
+
+def can_access_reports(current_user: UserResponse) -> bool:
+    """Check if user can access all reports"""
+    return current_user.role in [UserRole.ADMIN, UserRole.MANAGER, UserRole.SERVER]
+
+def can_manage_users(current_user: UserResponse) -> bool:
+    """Check if user can manage other users"""
+    return current_user.role == UserRole.ADMIN
+
+# ================================
 # Authentication Routes
 # ================================
 
