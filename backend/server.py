@@ -139,6 +139,53 @@ class Payment(BaseModel):
     amount: float
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+class Supplier(BaseModel):
+    id: str = Field(default_factory=lambda: str(ObjectId()))
+    name: str
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = True
+
+class SupplierCreate(BaseModel):
+    name: str
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+class Purchase(BaseModel):
+    id: str = Field(default_factory=lambda: str(ObjectId()))
+    purchase_number: str  # Unique purchase number
+    supplier_id: str
+    invoice_number: str
+    purchase_date: datetime = Field(default_factory=datetime.utcnow)
+    total_amount: float = 0.0
+    user_id: str  # Who recorded the purchase
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class PurchaseCreate(BaseModel):
+    supplier_id: str
+    invoice_number: str
+    purchase_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+class PurchaseItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(ObjectId()))
+    purchase_id: str
+    product_id: str
+    quantity: int
+    unit_cost: float
+    total_cost: float
+
+class PurchaseItemCreate(BaseModel):
+    product_id: str
+    quantity: int
+    unit_cost: float
+
 class Debt(BaseModel):
     id: str = Field(default_factory=lambda: str(ObjectId()))
     sale_id: str
