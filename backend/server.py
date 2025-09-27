@@ -693,7 +693,7 @@ async def get_sale_items(sale_id: str, current_user: UserResponse = Depends(get_
             {"$project": {
                 "id": {"$toString": "$_id"},
                 "sale_id": 1,
-                "product_id": 1,
+                "product_id": {"$toString": "$product_id"},
                 "quantity": 1,
                 "unit_price": 1,
                 "total_price": 1,
