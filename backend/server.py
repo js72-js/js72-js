@@ -476,6 +476,9 @@ async def get_categories(current_user: UserResponse = Depends(get_current_user))
 
 @api_router.post("/categories", response_model=Category)
 async def create_category(category_data: CategoryCreate, current_user: UserResponse = Depends(get_current_user)):
+    # Check permissions
+    require_admin_or_manager(current_user)
+    
     category = Category(**category_data.dict())
     category_dict = category.dict()
     category_dict["_id"] = ObjectId(category_dict["id"])
